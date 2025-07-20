@@ -291,7 +291,7 @@
                          {error && (
                             <div className="w-full bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg mb-4 flex gap-2">
                                 <AlertTriangle className="flex-shrink-0" />
-                                <p><span className="font-bold">Error: </span>{error}</p>
+                                <p className="whitespace-pre-wrap"><span className="font-bold">Error: </span>{error}</p>
                             </div>
                         )}
                          {libraryError && (
@@ -678,6 +678,18 @@
             required: ["story_pages"]
         };
 
+        const handleApiError = async (response) => {
+            let errorDetails = `API Error: ${response.status} ${response.statusText}`;
+            try {
+                const errorJson = await response.json();
+                errorDetails += ` - ${errorJson.error || ''} ${errorJson.details || ''}`;
+            } catch (e) {
+                const errorText = await response.text();
+                errorDetails += `\n\n[Non-JSON Response from Server]:\n${errorText}`;
+            }
+            return errorDetails;
+        };
+
         const findStoryContent = async (allPagesText, setError) => {
             const promptText = `
                 You are a literary assistant. Analyze the following pages from a children's book.
@@ -698,7 +710,7 @@
             };
 
             try {
-                const apiUrl = `/api/proxy`;
+                const apiUrl = `/api/proxy`; 
                 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
@@ -707,8 +719,7 @@
                 });
 
                 if (!response.ok) {
-                    const errorBody = await response.text();
-                    throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorBody}`);
+                    throw new Error(await handleApiError(response));
                 }
 
                 const result = await response.json();
@@ -801,8 +812,7 @@
                 });
 
                 if (!response.ok) {
-                    const errorBody = await response.text();
-                    throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorBody}`);
+                    throw new Error(await handleApiError(response));
                 }
 
                 const result = await response.json();
