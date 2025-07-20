@@ -8,17 +8,17 @@ export default async function handler(req, res) {
 
   try {
     // Construct the Google Gemini API URL using the correct model and the API key from environment variables.
-    // This is the key change: using 'gemini-2.0-flash' to match the frontend application's logic.
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
     
     // Forward the request from the client to the Gemini API.
+    // The key fix is to pass req.body directly, which includes the
+    // contents, generationConfig, and the responseSchema.
     const response = await fetch(geminiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      // The body from the client request is passed through directly.
-      body: JSON.stringify(req.body)
+      body: JSON.stringify(req.body) // Pass the entire body from the client
     });
 
     // Check if the request to the Gemini API was successful.
