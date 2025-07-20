@@ -25,16 +25,16 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useCallback } = React;
 
-        // --- LocalStorage Hooks for Data Persistence ---
+        // --- LocalStorage Hook for Data Persistence ---
         const useLocalStorage = (key, initialValue) => {
           const [storedValue, setStoredValue] = useState(() => {
             try {
               const item = window.localStorage.getItem(key);
               return item ? JSON.parse(item) : initialValue;
             } catch (error) {
-              console.error(error);
+              console.error("Error reading from localStorage", error);
               return initialValue;
             }
           });
@@ -45,13 +45,13 @@
               setStoredValue(valueToStore);
               window.localStorage.setItem(key, JSON.stringify(valueToStore));
             } catch (error) {
-              console.error(error);
+              console.error("Error writing to localStorage", error);
             }
           };
           return [storedValue, setValue];
         };
 
-        // --- Icon Components (replaces lucide-react) ---
+        // --- Icon Components (SVG replacements) ---
         const AlertTriangle = ({ className, size = 24 }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
         );
@@ -185,18 +185,18 @@
               }
           };
           
-          const updateProject = (projectId, updatedData) => {
+          const updateProject = useCallback((projectId, updatedData) => {
             setProjects(prev => prev.map(p => p.id === projectId ? { ...p, ...updatedData } : p));
-          };
+          }, [setProjects]);
 
           const currentProject = projects.find(p => p.id === currentProjectId);
 
           if (!librariesLoaded) {
-              return <div className="min-h-screen bg-gray-900 text-gray-200 flex items-center justify-center">Loading Libraries...</div>;
+              return <div className="min-h-screen bg-gray-900 text-gray-200 flex items-center justify-center"><Loader2 className="animate-spin mr-2" />Loading Libraries...</div>;
           }
           
           if (libraryError) {
-              return <div className="min-h-screen bg-gray-900 text-red-400 flex items-center justify-center">{libraryError}</div>;
+              return <div className="min-h-screen bg-gray-900 text-red-400 flex items-center justify-center p-4 text-center"><AlertTriangle className="mr-2" />{libraryError}</div>;
           }
 
           if (currentProjectId && currentProject) {
@@ -233,7 +233,7 @@
             <div className="max-w-4xl mx-auto">
               <header className="text-center mb-8">
                 <h1 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight">Animation Studio</h1>
-                <p className="mt-4 text-lg text-gray-400">Your projects are saved in your browser.</p>
+                <p className="mt-4 text-lg text-gray-400">Your projects are saved in your browser's local storage.</p>
               </header>
               <div className="mb-8">
                 <Button onClick={createNewProject}> 
@@ -242,10 +242,10 @@
               </div>
               <div className="space-y-4">
                 {projects.length > 0 ? projects.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(p => (
-                  <div key={p.id} className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 flex justify-between items-center">
+                  <div key={p.id} className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 flex justify-between items-center transition hover:border-indigo-500">
                     <div>
                       <h2 className="text-xl font-bold text-white">{p.name}</h2>
-                      <p className="text-sm text-gray-400">{`By ${p.author} | ${p.totalPages} Pages`}</p>
+                      <p className="text-sm text-gray-400">{`By ${p.author || 'Unknown'} | ${p.totalPages || 0} Pages | Created: ${new Date(p.createdAt).toLocaleDateString()}`}</p>
                     </div>
                     <div className="flex gap-2">
                       <Button onClick={() => selectProject(p.id)} variant="secondary">Open</Button>
@@ -253,7 +253,10 @@
                     </div>
                   </div>
                 )) : (
-                  <p className="text-center text-gray-500">No projects yet. Click "New Project" to start!</p>
+                  <div className="text-center text-gray-500 border-2 border-dashed border-gray-700 rounded-lg p-12">
+                    <h3 className="text-xl font-medium text-gray-300">No projects yet</h3>
+                    <p className="mt-2">Click "New Project" to start creating your animation!</p>
+                  </div>
                 )}
               </div>
             </div>
@@ -276,9 +279,9 @@
             }, [project.id]);
 
             return (
-                <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex">
+                <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col md:flex-row">
                     <PageNavigation project={project} currentSceneId={currentSceneId} setCurrentSceneId={setCurrentSceneId} goToDashboard={goToDashboard} />
-                    <main className="flex-1 p-8 overflow-y-auto">
+                    <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto" style={{maxHeight: '100vh'}}>
                          <header className="mb-8 flex justify-between items-start">
                             <div>
                                 <h1 className="text-3xl font-bold text-white">{project.name}</h1>
@@ -286,13 +289,15 @@
                             </div>
                          </header>
                          {error && (
-                            <div className="w-full bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg mb-4">
+                            <div className="w-full bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg mb-4 flex gap-2">
+                                <AlertTriangle className="flex-shrink-0" />
                                 <p><span className="font-bold">Error: </span>{error}</p>
                             </div>
                         )}
                          {libraryError && (
-                            <div className="w-full bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg mb-4">
-                                <p><span className="font-bold">Error: </span>{libraryError}</p>
+                            <div className="w-full bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg mb-4 flex gap-2">
+                                <AlertTriangle className="flex-shrink-0" />
+                                <p><span className="font-bold">Library Error: </span>{libraryError}</p>
                             </div>
                         )}
                         <SceneGenerator project={project} updateProject={updateProject} currentSceneId={currentSceneId} setCurrentSceneId={setCurrentSceneId} setError={setError} />
@@ -308,7 +313,7 @@
             const firstPendingSceneIndex = navItems.findIndex(id => !project.scenes[id] || project.scenes[id].status !== 'completed');
 
             return (
-                <nav className="w-64 bg-gray-900/50 border-r border-gray-800 p-4 flex flex-col">
+                <nav className="w-full md:w-64 bg-gray-900/50 border-b md:border-b-0 md:border-r border-gray-800 p-4 flex flex-col">
                     <Button onClick={goToDashboard} variant="secondary" className="mb-6"><Home size={16} /> Dashboard</Button>
                     {navItems.length > 0 && <h3 className="text-lg font-semibold text-white mb-4">Project Pages</h3>}
                     <ul className="space-y-2">
@@ -374,7 +379,7 @@
                     let coverImageBase64 = '';
                     const allPagesText = [];
 
-                    if (file.name.endsWith('.pdf')) {
+                    if (file.type === 'application/pdf') {
                         if (!window.pdfjsLib) throw new Error("PDF parsing library not loaded.");
                         
                         const fileBuffer = await file.arrayBuffer();
@@ -398,13 +403,13 @@
                         coverImageBase64 = canvas.toDataURL('image/jpeg').split(',')[1];
 
                     } else {
-                        throw new Error("Unsupported file type. Please upload a PDF layout file.");
+                        throw new Error("Unsupported file type. Please upload a PDF file.");
                     }
                     
                     setLoadingMessage('Analyzing story content with AI...');
                     const storyContent = await findStoryContent(allPagesText, setError);
                     if (!storyContent || storyContent.length === 0) {
-                        throw new Error("AI could not identify the main story pages in the document.");
+                        throw new Error("AI could not identify the main story pages in the document. Please check the PDF content.");
                     }
 
                     const totalPages = storyContent.length;
@@ -458,7 +463,7 @@
                                 <p className="text-xs text-gray-500 mt-1">PDF file only</p>
                             </>
                         )}
-                        <input id="story-upload" type="file" className="hidden" accept=".pdf" onChange={handleFileChange} disabled={isFileParsing} />
+                        <input id="story-upload" type="file" className="hidden" accept=".pdf,application/pdf" onChange={handleFileChange} disabled={isFileParsing} />
                     </label>
                 </div>
             );
@@ -562,7 +567,7 @@
             };
             
             const handleGenerate = async () => {
-                if ((sceneId !== 'end' && !imageBase64) && !isRegenerating) {
+                if (sceneId !== 'end' && !imageBase64 && !isRegenerating) {
                     setError('Please upload an illustration for this page.');
                     return;
                 }
@@ -603,7 +608,7 @@
             if (sceneId === 'cover') headerText = 'Generate Cover Animation';
             else if (sceneId === 'end') headerText = 'Generate End Scene';
             else headerText = `Generate Animation for Page ${sceneId}`;
-            if (isRegenerating) headerText = `Regenerate: ${headerText.split(' ')[0]}`;
+            if (isRegenerating) headerText = `Regenerate: ${headerText.split(' ')[1]} Scene`;
 
 
             return (
@@ -616,8 +621,7 @@
                                 {`Illustration for Page ${sceneId}`}
                             </label>
                             <label htmlFor="scene-image-upload" className="flex flex-col items-center justify-center w-full h-48 border-2 border-gray-600 border-dashed rounded-lg cursor-pointer hover:bg-gray-700/50">
-                                <UploadCloud />
-                                <p>{imageFile ? imageFile.name : 'Click to upload'}</p>
+                                {imageBase64 ? <img src={`data:image/jpeg;base64,${imageBase64}`} alt="Preview" className="max-h-full max-w-full object-contain rounded-md" /> : <><UploadCloud /> <p>{imageFile ? imageFile.name : 'Click to upload'}</p></>}
                                 <input id="scene-image-upload" type="file" className="hidden" accept="image/*" onChange={handleImageChange} />
                             </label>
                         </div>
@@ -694,7 +698,7 @@
             };
 
             try {
-                const apiUrl = `/api/proxy`;  // Use the serverless proxy to hide the API key
+                const apiUrl = `/api/proxy`;
                 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
@@ -788,7 +792,7 @@
             };
 
             try {
-                const apiUrl = `/api/proxy`;  // Use the serverless proxy to hide the API key
+                const apiUrl = `/api/proxy`;
                 
                 const response = await fetch(apiUrl, {
                     method: 'POST',
@@ -803,7 +807,7 @@
 
                 const result = await response.json();
                 
-                if (result.candidates && result.candidates.length > 0) {
+                if (result.candidates && result.candidates.length > 0 && result.candidates[0].content.parts[0].text) {
                     const jsonText = result.candidates[0].content.parts[0].text;
                     const newPrompt = JSON.parse(jsonText);
                     return newPrompt;
@@ -818,7 +822,7 @@
             }
         };
 
-        // Mount the App
+        // Mount the React App to the 'root' div in the HTML.
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
