@@ -4,16 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Animation Studio</title>
-    <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <!-- React Libraries -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <!-- Babel to compile JSX in the browser -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         body {
@@ -28,28 +24,27 @@
         const { useState, useEffect, useCallback } = React;
 
         // --- LocalStorage Hook for Data Persistence ---
-        // This custom hook saves and retrieves project data from the browser's local storage.
         const useLocalStorage = (key, initialValue) => {
-          const [storedValue, setStoredValue] = useState(() => {
-            try {
-              const item = window.localStorage.getItem(key);
-              return item ? JSON.parse(item) : initialValue;
-            } catch (error) {
-              console.error("Error reading from localStorage", error);
-              return initialValue;
-            }
-          });
+            const [storedValue, setStoredValue] = useState(() => {
+                try {
+                    const item = window.localStorage.getItem(key);
+                    return item ? JSON.parse(item) : initialValue;
+                } catch (error) {
+                    console.error("Error reading from localStorage", error);
+                    return initialValue;
+                }
+            });
 
-          const setValue = (value) => {
-            try {
-              const valueToStore = value instanceof Function ? value(storedValue) : value;
-              setStoredValue(valueToStore);
-              window.localStorage.setItem(key, JSON.stringify(valueToStore));
-            } catch (error) {
-              console.error("Error writing to localStorage", error);
-            }
-          };
-          return [storedValue, setValue];
+            const setValue = (value) => {
+                try {
+                    const valueToStore = value instanceof Function ? value(storedValue) : value;
+                    setStoredValue(valueToStore);
+                    window.localStorage.setItem(key, JSON.stringify(valueToStore));
+                } catch (error) {
+                    console.error("Error writing to localStorage", error);
+                }
+            };
+            return [storedValue, setValue];
         };
 
         // --- Icon Components (SVG replacements for a library like lucide-react) ---
@@ -84,21 +79,20 @@
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.71 0L11.5 9.51l8.84 8.84 7.15-7.15a1.21 1.21 0 0 0 0-1.71l-1.27-1.28zM11.5 9.51 2.66 18.35l-1.28-1.27a1.21 1.21 0 0 1 0-1.71l8.84-8.84-1.71-1.71a1.21 1.21 0 0 0-1.71 0l-1.28 1.28-2.55-2.55a1.21 1.21 0 0 0-1.71 0L1 4.9l8.84 8.84 2.55-2.55.51-.51z"></path></svg>
         );
 
-
         // --- Helper Components ---
         const Button = ({ onClick, children, disabled = false, className = '', variant = 'primary' }) => {
-          const baseClasses = 'flex items-center justify-center gap-2 px-4 py-2 font-semibold rounded-lg shadow-md transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900';
-          const variants = {
-            primary: 'text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-500',
-            secondary: 'text-gray-200 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-500',
-            danger: 'text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400',
-            warning: 'bg-yellow-600/20 hover:bg-yellow-600/40 text-yellow-300'
-          };
-          return (
-            <button onClick={onClick} disabled={disabled} className={`${baseClasses} ${variants[variant]} ${className}`}>
-                {children}
-            </button>
-          );
+            const baseClasses = 'flex items-center justify-center gap-2 px-4 py-2 font-semibold rounded-lg shadow-md transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900';
+            const variants = {
+                primary: 'text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-500',
+                secondary: 'text-gray-200 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-500',
+                danger: 'text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400',
+                warning: 'bg-yellow-600/20 hover:bg-yellow-600/40 text-yellow-300'
+            };
+            return (
+                <button onClick={onClick} disabled={disabled} className={`${baseClasses} ${variants[variant]} ${className}`}>
+                    {children}
+                </button>
+            );
         };
 
         const ConfirmationModal = ({ project, onConfirm, onCancel }) => {
@@ -124,146 +118,143 @@
             );
         };
 
-
         // --- Main App: Manages Views (Dashboard vs. Workspace) ---
         function App() {
-          const [projects, setProjects] = useLocalStorage('animation-projects', []);
-          const [currentProjectId, setCurrentProjectId] = useState(null);
-          const [librariesLoaded, setLibrariesLoaded] = useState(false);
-          const [libraryError, setLibraryError] = useState('');
-          const [projectToDelete, setProjectToDelete] = useState(null);
+            const [projects, setProjects] = useLocalStorage('animation-projects', []);
+            const [currentProjectId, setCurrentProjectId] = useState(null);
+            const [librariesLoaded, setLibrariesLoaded] = useState(false);
+            const [libraryError, setLibraryError] = useState('');
+            const [projectToDelete, setProjectToDelete] = useState(null);
 
-          useEffect(() => {
-            // This effect loads external libraries (pdf.js) required for the app to function.
-            const loadScript = (url) => {
-                return new Promise((resolve, reject) => {
-                    const existingScript = document.querySelector(`script[src="${url}"]`);
-                    if (existingScript) {
-                        resolve();
-                        return;
+            useEffect(() => {
+                const loadScript = (url) => {
+                    return new Promise((resolve, reject) => {
+                        const existingScript = document.querySelector(`script[src="${url}"]`);
+                        if (existingScript) {
+                            resolve();
+                            return;
+                        }
+                        const script = document.createElement('script');
+                        script.src = url;
+                        script.async = true;
+                        script.onload = resolve;
+                        script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
+                        document.body.appendChild(script);
+                    });
+                };
+
+                loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js')
+                .then(() => {
+                    if (window.pdfjsLib) {
+                        window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
                     }
-                    const script = document.createElement('script');
-                    script.src = url;
-                    script.async = true;
-                    script.onload = resolve;
-                    script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
-                    document.body.appendChild(script);
+                    setLibrariesLoaded(true);
+                }).catch(error => {
+                    console.error(error);
+                    setLibraryError('Failed to load necessary libraries. Please refresh the page.');
                 });
+            }, []);
+
+            const createNewProject = () => {
+                const newProject = {
+                    id: `proj_${Date.now()}`,
+                    name: 'Untitled Project',
+                    author: 'Unknown Author',
+                    storyText: '',
+                    totalPages: 0,
+                    scenes: {},
+                    createdAt: new Date().toISOString(),
+                };
+                setProjects(prev => [...prev, newProject]);
+                setCurrentProjectId(newProject.id);
             };
 
-            loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js')
-            .then(() => {
-                if (window.pdfjsLib) {
-                    // Configure the worker for pdf.js to run in the background.
-                    window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
+            const confirmDeleteProject = () => {
+                if (projectToDelete) {
+                    setProjects(prev => prev.filter(p => p.id !== projectToDelete.id));
+                    setProjectToDelete(null);
+                    if (currentProjectId === projectToDelete.id) {
+                        setCurrentProjectId(null);
+                    }
                 }
-                setLibrariesLoaded(true);
-            }).catch(error => {
-                console.error(error);
-                setLibraryError('Failed to load necessary libraries. Please refresh the page.');
-            });
-          }, []);
-
-          const createNewProject = () => {
-            const newProject = {
-              id: `proj_${Date.now()}`,
-              name: 'Untitled Project',
-              author: 'Unknown Author',
-              storyText: '',
-              totalPages: 0,
-              scenes: {},
-              createdAt: new Date().toISOString(),
             };
-            setProjects(prev => [...prev, newProject]);
-            setCurrentProjectId(newProject.id);
-          };
+            
+            const updateProject = useCallback((projectId, updatedData) => {
+                setProjects(prev => prev.map(p => p.id === projectId ? { ...p, ...updatedData } : p));
+            }, [setProjects]);
 
-          const confirmDeleteProject = () => {
-              if (projectToDelete) {
-                  setProjects(prev => prev.filter(p => p.id !== projectToDelete.id));
-                  setProjectToDelete(null);
-                  if (currentProjectId === projectToDelete.id) {
-                      setCurrentProjectId(null);
-                  }
-              }
-          };
-          
-          const updateProject = useCallback((projectId, updatedData) => {
-            setProjects(prev => prev.map(p => p.id === projectId ? { ...p, ...updatedData } : p));
-          }, [setProjects]);
+            const currentProject = projects.find(p => p.id === currentProjectId);
 
-          const currentProject = projects.find(p => p.id === currentProjectId);
+            if (!librariesLoaded) {
+                return <div className="min-h-screen bg-gray-900 text-gray-200 flex items-center justify-center"><Loader2 className="animate-spin mr-2" />Loading Libraries...</div>;
+            }
+            
+            if (libraryError) {
+                return <div className="min-h-screen bg-gray-900 text-red-400 flex items-center justify-center p-4 text-center"><AlertTriangle className="mr-2" />{libraryError}</div>;
+            }
 
-          if (!librariesLoaded) {
-              return <div className="min-h-screen bg-gray-900 text-gray-200 flex items-center justify-center"><Loader2 className="animate-spin mr-2" />Loading Libraries...</div>;
-          }
-          
-          if (libraryError) {
-              return <div className="min-h-screen bg-gray-900 text-red-400 flex items-center justify-center p-4 text-center"><AlertTriangle className="mr-2" />{libraryError}</div>;
-          }
+            if (currentProjectId && currentProject) {
+                return (
+                    <ProjectWorkspace
+                        project={currentProject}
+                        updateProject={updateProject}
+                        goToDashboard={() => setCurrentProjectId(null)}
+                        libraryError={libraryError}
+                    />
+                );
+            }
 
-          if (currentProjectId && currentProject) {
             return (
-              <ProjectWorkspace
-                project={currentProject}
-                updateProject={updateProject}
-                goToDashboard={() => setCurrentProjectId(null)}
-                libraryError={libraryError}
-              />
+                <>
+                    <ConfirmationModal 
+                        project={projectToDelete} 
+                        onConfirm={confirmDeleteProject} 
+                        onCancel={() => setProjectToDelete(null)} 
+                    />
+                    <ProjectsDashboard
+                        projects={projects}
+                        createNewProject={createNewProject}
+                        deleteProject={(project) => setProjectToDelete(project)}
+                        selectProject={setCurrentProjectId}
+                    />
+                </>
             );
-          }
-
-          return (
-            <>
-                <ConfirmationModal 
-                    project={projectToDelete} 
-                    onConfirm={confirmDeleteProject} 
-                    onCancel={() => setProjectToDelete(null)} 
-                />
-                <ProjectsDashboard
-                  projects={projects}
-                  createNewProject={createNewProject}
-                  deleteProject={(project) => setProjectToDelete(project)}
-                  selectProject={setCurrentProjectId}
-                />
-            </>
-          );
         }
 
         // --- Projects Dashboard View ---
         const ProjectsDashboard = ({ projects, createNewProject, deleteProject, selectProject }) => (
-          <div className="min-h-screen bg-gray-900 text-gray-200 font-sans p-4 sm:p-6 lg:p-8">
-            <div className="max-w-4xl mx-auto">
-              <header className="text-center mb-8">
-                <h1 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight">Animation Studio</h1>
-                <p className="mt-4 text-lg text-gray-400">Your projects are saved in your browser's local storage.</p>
-              </header>
-              <div className="mb-8">
-                <Button onClick={createNewProject}> 
-                    <PlusCircle size={20} /> New Project
-                </Button>
-              </div>
-              <div className="space-y-4">
-                {projects.length > 0 ? projects.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(p => (
-                  <div key={p.id} className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 flex justify-between items-center transition hover:border-indigo-500">
-                    <div>
-                      <h2 className="text-xl font-bold text-white">{p.name}</h2>
-                      <p className="text-sm text-gray-400">{`By ${p.author || 'Unknown'} | ${p.totalPages || 0} Pages | Created: ${new Date(p.createdAt).toLocaleDateString()}`}</p>
+            <div className="min-h-screen bg-gray-900 text-gray-200 font-sans p-4 sm:p-6 lg:p-8">
+                <div className="max-w-4xl mx-auto">
+                    <header className="text-center mb-8">
+                        <h1 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight">Animation Studio</h1>
+                        <p className="mt-4 text-lg text-gray-400">Your projects are saved in your browser's local storage.</p>
+                    </header>
+                    <div className="mb-8">
+                        <Button onClick={createNewProject}> 
+                            <PlusCircle size={20} /> New Project
+                        </Button>
                     </div>
-                    <div className="flex gap-2">
-                      <Button onClick={() => selectProject(p.id)} variant="secondary">Open</Button>
-                      <Button onClick={() => deleteProject(p)} variant="danger"><Trash2 size={16} /></Button>
+                    <div className="space-y-4">
+                        {projects.length > 0 ? projects.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(p => (
+                            <div key={p.id} className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 flex justify-between items-center transition hover:border-indigo-500">
+                                <div>
+                                    <h2 className="text-xl font-bold text-white">{p.name}</h2>
+                                    <p className="text-sm text-gray-400">{`By ${p.author || 'Unknown'} | ${p.totalPages || 0} Pages | Created: ${new Date(p.createdAt).toLocaleDateString()}`}</p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <Button onClick={() => selectProject(p.id)} variant="secondary">Open</Button>
+                                    <Button onClick={() => deleteProject(p)} variant="danger"><Trash2 size={16} /></Button>
+                                </div>
+                            </div>
+                        )) : (
+                            <div className="text-center text-gray-500 border-2 border-dashed border-gray-700 rounded-lg p-12">
+                                <h3 className="text-xl font-medium text-gray-300">No projects yet</h3>
+                                <p className="mt-2">Click "New Project" to start creating your animation!</p>
+                            </div>
+                        )}
                     </div>
-                  </div>
-                )) : (
-                  <div className="text-center text-gray-500 border-2 border-dashed border-gray-700 rounded-lg p-12">
-                    <h3 className="text-xl font-medium text-gray-300">No projects yet</h3>
-                    <p className="mt-2">Click "New Project" to start creating your animation!</p>
-                  </div>
-                )}
-              </div>
+                </div>
             </div>
-          </div>
         );
 
         // --- Project Workspace View ---
@@ -272,44 +263,38 @@
             const [error, setError] = useState('');
             
             useEffect(() => {
-                // When a project is loaded for the first time, this effect determines
-                // which scene to display initially. It defaults to the first incomplete
-                // scene, allowing users to pick up where they left off.
-                // It intentionally only runs when the project.id changes to prevent 
-                // the automatic navigation that was happening after scene generation.
                 if (project.storyText) {
                     const navItems = ['cover', ...Array.from({ length: project.totalPages }, (_, i) => String(i + 1)), 'end'];
                     const firstPendingScene = navItems.find(id => !project.scenes[id] || project.scenes[id].status !== 'completed');
                     setCurrentSceneId(firstPendingScene || 'end');
                 } else {
-                    // If there's no story yet, default to the cover scene for the uploader.
                     setCurrentSceneId('cover');
                 }
-            }, [project.id]); // <-- FIX: Only re-run when the project itself changes.
+            }, [project.id]);
 
             return (
                 <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col md:flex-row">
                     <PageNavigation project={project} currentSceneId={currentSceneId} setCurrentSceneId={setCurrentSceneId} goToDashboard={goToDashboard} />
                     <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto" style={{maxHeight: '100vh'}}>
-                         <header className="mb-8 flex justify-between items-start">
-                            <div>
-                                <h1 className="text-3xl font-bold text-white">{project.name}</h1>
-                                <p className="text-md text-gray-400">{`By: ${project.author}`}</p>
-                            </div>
-                         </header>
-                         {error && (
-                            <div className="w-full bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg mb-4 flex gap-2">
-                                <AlertTriangle className="flex-shrink-0" />
-                                <p><span className="font-bold">Error: </span>{error}</p>
-                            </div>
-                        )}
-                         {libraryError && (
-                            <div className="w-full bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg mb-4 flex gap-2">
-                                <AlertTriangle className="flex-shrink-0" />
-                                <p><span className="font-bold">Library Error: </span>{libraryError}</p>
-                            </div>
-                        )}
-                        <SceneGenerator project={project} updateProject={updateProject} currentSceneId={currentSceneId} setCurrentSceneId={setCurrentSceneId} setError={setError} />
+                            <header className="mb-8 flex justify-between items-start">
+                                <div>
+                                    <h1 className="text-3xl font-bold text-white">{project.name}</h1>
+                                    <p className="text-md text-gray-400">{`By: ${project.author}`}</p>
+                                </div>
+                            </header>
+                            {error && (
+                                <div className="w-full bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg mb-4 flex gap-2">
+                                    <AlertTriangle className="flex-shrink-0" />
+                                    <p><span className="font-bold">Error: </span>{error}</p>
+                                </div>
+                            )}
+                            {libraryError && (
+                                <div className="w-full bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg mb-4 flex gap-2">
+                                    <AlertTriangle className="flex-shrink-0" />
+                                    <p><span className="font-bold">Library Error: </span>{libraryError}</p>
+                                </div>
+                            )}
+                            <SceneGenerator project={project} updateProject={updateProject} currentSceneId={currentSceneId} setCurrentSceneId={setCurrentSceneId} setError={setError} />
                     </main>
                 </div>
             );
@@ -319,7 +304,6 @@
         const PageNavigation = ({ project, currentSceneId, setCurrentSceneId, goToDashboard }) => {
             const navItems = project.totalPages > 0 ? ['cover', ...Array.from({ length: project.totalPages }, (_, i) => String(i + 1)), 'end'] : [];
             
-            // This logic finds the first scene that hasn't been completed yet.
             const firstPendingSceneIndex = navItems.findIndex(id => !project.scenes[id] || project.scenes[id].status !== 'completed');
 
             return (
@@ -329,7 +313,6 @@
                     <ul className="space-y-2">
                         {navItems.map((id, index) => {
                             const isCurrent = id === currentSceneId;
-                            // Pages after the first pending one are disabled to enforce order.
                             const isDisabled = firstPendingSceneIndex !== -1 && index > firstPendingSceneIndex;
 
                             let label = '';
@@ -360,17 +343,14 @@
         const SceneGenerator = ({ project, updateProject, currentSceneId, setCurrentSceneId, setError }) => {
             const currentSceneData = project.scenes[currentSceneId];
 
-            // If the story text hasn't been extracted yet, show the uploader.
             if (!project.storyText) {
                 return <LayoutUploader {...{ project, updateProject, setCurrentSceneId, setError }} />;
             }
 
-            // If the current scene is already generated, show the viewer.
             if (currentSceneData && currentSceneData.status === 'completed') {
                 return <CompletedSceneViewer {...{ sceneId: currentSceneId, project, updateProject, setCurrentSceneId, setError }} />;
             }
             
-            // Otherwise, show the UI to generate the scene.
             return <SceneGeneratorUI {...{ sceneId: currentSceneId, project, updateProject, setError }} />;
         };
 
@@ -675,8 +655,6 @@
         };
 
         // --- Reusable API and Generation Logic ---
-        // This section contains the core logic for interacting with the Gemini API.
-
         const storyContentSchema = {
             type: "OBJECT",
             properties: {
