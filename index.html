@@ -863,8 +863,13 @@
                 establishedContext += `\n**Animation Style Guide:**\n- Style: ${establishedStyle.style}\n- Tone: ${establishedStyle.tone}\n- Palette: ${establishedStyle.color_palette}\n`;
             }
 
+            // --- THIS IS THE KEY CHANGE FOR THE COVER SCENE ---
             if (sceneId === 'cover') {
-                taskInstruction = `Analyze the attached book cover image. Based on the visuals, generate a dynamic opening title sequence animation. Extract the book's title and author's name. Decompose all visible characters into individual objects with unique character_ids.`;
+                taskInstruction = `This is the COVER SCENE. Your task is to generate a structured and visually dynamic title sequence.
+                1.  **Extract Main Info:** Identify the main book Title and the Author's name. Populate the top-level 'extracted_title' and 'extracted_author' fields. IGNORE all other text like 'Illustrated by' or small taglines.
+                2.  **Describe the Overall Scene:** Crucially, analyze the visual elements of the cover illustration (characters, setting, mood). Describe a dynamic, animated version of this scene in the main 'action', 'scene', and 'animation_style' fields. Make it engaging and hint at the story's themes. Do not leave 'subtle_motions' as 'None'. For example, describe an animated background based on the cover art.
+                3.  **Build Animation Timeline:** Create a 'title_sequence' array with separate, sequential steps for the title and author. Use an ORDERLY animation style like 'reveal word by word' or 'gentle fade-in' and AVOID chaotic, scattered effects. The author's animation MUST start after the title's animation ends. For multi-line titles, create a separate step for each line.
+                4.  **Add Director's Note:** In the 'metadata.notes' field, add a note to ensure the final text layout is clean and visually appealing, without duplicated or overlapping words.`;
             } else if (sceneId === 'end') {
                 taskInstruction = `This is the final scene. Generate a concluding animation prompt. Use the Character Glossary to create a gentle, summary scene evoking a feeling of happy resolution.`;
             } else {
