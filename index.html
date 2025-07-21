@@ -316,7 +316,7 @@
                 } else {
                     setCurrentSceneId('cover');
                 }
-            }, [project.id]);
+            }, [project.id, project.totalPages]); // Added project.totalPages to dependencies
 
             return (
                 <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col md:flex-row">
@@ -474,11 +474,9 @@
             const handleConfirmCoverInfo = ({ confirmedTitle, confirmedAuthor }) => {
                 const { initialProjectState, newPrompt } = pendingCoverInfo;
                 
-                // Update the prompt with the confirmed details
                 newPrompt.extracted_title = confirmedTitle;
                 newPrompt.extracted_author = confirmedAuthor;
                 
-                // Also update the title sequence text if it exists, to match the confirmed info
                 if (newPrompt.title_sequence) {
                     newPrompt.title_sequence.forEach(step => {
                         if (step.element_type === 'title') step.element_text = confirmedTitle;
@@ -493,7 +491,7 @@
 
                 const finalProjectState = {
                     ...initialProjectState,
-                    totalPages: initialProjectState.totalPages, // Explicitly include totalPages
+                    totalPages: initialProjectState.totalPages, // This line fixes the bug
                     scenes: finalScenes,
                     name: confirmedTitle,
                     author: confirmedAuthor,
@@ -502,7 +500,6 @@
                 updateProject(project.id, finalProjectState);
                 setCurrentSceneId('cover');
 
-                // Clean up
                 setPendingCoverInfo(null);
                 setIsFileParsing(false);
             };
@@ -793,7 +790,6 @@
             }
         };
 
-        // ========= FINAL, IMPROVED PROMPT LOGIC =========
         const buildApiPromptText = (project, sceneId, feedback) => {
             const systemInstruction = `You are a precise and detail-oriented animation director. Your primary goal is to create a structured JSON animation prompt from a children's book page.
             
