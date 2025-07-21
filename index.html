@@ -118,6 +118,53 @@
             );
         };
 
+        // --- NEW COMPONENT: Modal for confirming cover title and author ---
+        const CoverInfoConfirmationModal = ({ initialTitle, initialAuthor, onConfirm, onCancel }) => {
+            const [title, setTitle] = useState(initialTitle);
+            const [author, setAuthor] = useState(initialAuthor);
+
+            const handleConfirm = () => {
+                onConfirm({ confirmedTitle: title, confirmedAuthor: author });
+            };
+            
+            return (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+                    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 max-w-md w-full mx-4">
+                        <h3 className="text-xl font-bold text-white mb-2">Review and Confirm</h3>
+                        <p className="text-sm text-gray-400 mb-6">Please correct the extracted Title and Author before creating the project.</p>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label htmlFor="title" className="block mb-2 text-sm font-medium text-gray-300">Book Title</label>
+                                <input
+                                    type="text"
+                                    id="title"
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
+                                    className="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none transition"
+                                />
+                            </div>
+                             <div>
+                                <label htmlFor="author" className="block mb-2 text-sm font-medium text-gray-300">Author Name</label>
+                                <input
+                                    type="text"
+                                    id="author"
+                                    value={author}
+                                    onChange={(e) => setAuthor(e.target.value)}
+                                    className="w-full p-2 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none transition"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 mt-8">
+                            <Button onClick={onCancel} variant="secondary">Cancel</Button>
+                            <Button onClick={handleConfirm} variant="primary">Confirm and Create Project</Button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         // --- Main App: Manages Views (Dashboard vs. Workspace) ---
         function App() {
             const [projects, setProjects] = useLocalStorage('animation-projects', []);
@@ -360,6 +407,8 @@
             const [isFileParsing, setIsFileParsing] = useState(false);
             const [loadingMessage, setLoadingMessage] = useState('');
             const [storyFile, setStoryFile] = useState(null);
+            // --- NEW STATE: Holds data for the confirmation modal ---
+            const [pendingCoverInfo, setPendingCoverInfo] = useState(null);
 
             const handleFileChange = async (e) => {
                 const file = e.target.files[0];
@@ -375,35 +424,29 @@
 
                     if (file.type === 'application/pdf') {
                         if (!window.pdfjsLib) throw new Error("PDF parsing library not loaded.");
-                        
                         const fileBuffer = await file.arrayBuffer();
                         const pdf = await window.pdfjsLib.getDocument(fileBuffer).promise;
-                        
                         for (let i = 1; i <= pdf.numPages; i++) {
                             const page = await pdf.getPage(i);
                             const textContent = await page.getTextContent();
-                            const pageText = textContent.items.map(item => item.str).join(' ');
-                            allPagesText.push({ pageNum: i, text: pageText });
+                            allPagesText.push({ pageNum: i, text: textContent.items.map(item => item.str).join(' ') });
                         }
-
                         setLoadingMessage('Extracting cover image...');
                         const coverPage = await pdf.getPage(1);
                         const viewport = coverPage.getViewport({ scale: 1.5 });
                         const canvas = document.createElement('canvas');
-                        const context = canvas.getContext('2d');
                         canvas.height = viewport.height;
                         canvas.width = viewport.width;
-                        await coverPage.render({ canvasContext: context, viewport: viewport }).promise;
+                        await coverPage.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
                         coverImageBase64 = canvas.toDataURL('image/jpeg').split(',')[1];
-
                     } else {
                         throw new Error("Unsupported file type. Please upload a PDF file.");
                     }
                     
-                    setLoadingMessage('Analyzing story content with AI...');
+                    setLoadingMessage('Analyzing story content...');
                     const storyContent = await findStoryContent(allPagesText, setError);
                     if (!storyContent || storyContent.length === 0) {
-                        throw new Error("AI could not identify the main story pages in the document. Please check the PDF content.");
+                        throw new Error("AI could not identify the main story pages in the document.");
                     }
 
                     const totalPages = storyContent.length;
@@ -418,48 +461,82 @@
                     setLoadingMessage('Generating opening scene...');
                     const newPrompt = await generateScene(initialProjectState, 'cover', coverImageBase64, '', setError);
 
-                    const finalScenes = {
-                        ...initialProjectState.scenes,
-                        cover: { status: 'completed', prompt: newPrompt }
-                    };
-
-                    const finalProjectState = {
-                        ...initialProjectState,
-                        scenes: finalScenes,
-                        name: newPrompt.extracted_title || project.name,
-                        author: newPrompt.extracted_author || project.author,
-                    };
+                    // --- MODIFIED WORKFLOW: Instead of saving, show confirmation modal ---
+                    const aiGuessedTitle = newPrompt.extracted_title || file.name.replace(/\.pdf$/i, '') || 'Untitled Project';
+                    const aiGuessedAuthor = newPrompt.extracted_author || 'Unknown Author';
                     
-                    updateProject(project.id, finalProjectState);
-                    setCurrentSceneId('cover');
+                    setPendingCoverInfo({ initialProjectState, newPrompt, aiGuessedTitle, aiGuessedAuthor });
+                    // The loading spinner will stop, and the modal will appear.
 
                 } catch (err) {
                     setError(err.message);
-                } finally {
-                    setIsFileParsing(false);
+                    setIsFileParsing(false); // Stop loading on error
                 }
             };
 
+            // --- NEW FUNCTION: Handles confirmation from the modal ---
+            const handleConfirmCoverInfo = ({ confirmedTitle, confirmedAuthor }) => {
+                const { initialProjectState, newPrompt } = pendingCoverInfo;
+
+                // Update the prompt with the confirmed details
+                newPrompt.extracted_title = confirmedTitle;
+                newPrompt.extracted_author = confirmedAuthor;
+
+                const finalScenes = {
+                    ...initialProjectState.scenes,
+                    cover: { status: 'completed', prompt: newPrompt }
+                };
+
+                const finalProjectState = {
+                    ...initialProjectState,
+                    scenes: finalScenes,
+                    name: confirmedTitle,
+                    author: confirmedAuthor,
+                };
+                
+                updateProject(project.id, finalProjectState);
+                setCurrentSceneId('cover');
+
+                // Clean up
+                setPendingCoverInfo(null);
+                setIsFileParsing(false);
+            };
+
             return (
-                <div className="bg-gray-800/50 p-6 rounded-lg">
-                    <h3 className="text-2xl font-bold mb-4">Upload Your Book's Layout</h3>
-                    <p className="text-gray-400 mb-4">Upload your book's layout as a PDF. The app will extract the text, use the first page as the cover, and automatically generate the opening scene.</p>
-                    <label htmlFor="story-upload" className={`flex flex-col items-center justify-center w-full h-48 border-2 border-gray-600 border-dashed rounded-lg bg-gray-800/50 transition cursor-pointer hover:bg-gray-700/50`}>
-                        {isFileParsing ? (
-                            <>
-                                <Loader2 className="animate-spin text-indigo-400" size={32} />
-                                <p className="mt-2 text-indigo-300">{loadingMessage}</p>
-                            </>
-                        ) : (
-                            <>
-                                <UploadCloud size={32} />
-                                <p className="mt-2">{storyFile ? storyFile.name : 'Click to upload'}</p>
-                                <p className="text-xs text-gray-500 mt-1">PDF file only</p>
-                            </>
-                        )}
-                        <input id="story-upload" type="file" className="hidden" accept=".pdf,application/pdf" onChange={handleFileChange} disabled={isFileParsing} />
-                    </label>
-                </div>
+                <>
+                    {/* --- NEW: Render the confirmation modal when there's pending info --- */}
+                    {pendingCoverInfo && (
+                        <CoverInfoConfirmationModal
+                            initialTitle={pendingCoverInfo.aiGuessedTitle}
+                            initialAuthor={pendingCoverInfo.aiGuessedAuthor}
+                            onConfirm={handleConfirmCoverInfo}
+                            onCancel={() => {
+                                setPendingCoverInfo(null);
+                                setIsFileParsing(false);
+                            }}
+                        />
+                    )}
+
+                    <div className="bg-gray-800/50 p-6 rounded-lg">
+                        <h3 className="text-2xl font-bold mb-4">Upload Your Book's Layout</h3>
+                        <p className="text-gray-400 mb-4">Upload your book's layout as a PDF. The app will extract the text, use the first page as the cover, and automatically generate the opening scene.</p>
+                        <label htmlFor="story-upload" className={`flex flex-col items-center justify-center w-full h-48 border-2 border-gray-600 border-dashed rounded-lg bg-gray-800/50 transition cursor-pointer hover:bg-gray-700/50`}>
+                            {isFileParsing ? (
+                                <>
+                                    <Loader2 className="animate-spin text-indigo-400" size={32} />
+                                    <p className="mt-2 text-indigo-300">{loadingMessage}</p>
+                                </>
+                            ) : (
+                                <>
+                                    <UploadCloud size={32} />
+                                    <p className="mt-2">{storyFile ? storyFile.name : 'Click to upload'}</p>
+                                    <p className="text-xs text-gray-500 mt-1">PDF file only</p>
+                                </>
+                            )}
+                            <input id="story-upload" type="file" className="hidden" accept=".pdf,application/pdf" onChange={handleFileChange} disabled={isFileParsing} />
+                        </label>
+                    </div>
+                </>
             );
         };
 
@@ -716,7 +793,7 @@
             }
         };
 
-        // ========= START OF MODIFIED CODE =========
+        // ========= UPDATED SCHEMA AND PROMPT LOGIC =========
         const animationPromptSchema = {
             type: "OBJECT",
             properties: {
@@ -729,7 +806,7 @@
                     items: {
                         type: "OBJECT",
                         properties: {
-                            character_id: { type: "STRING", description: "A unique, simple, lowercase ID for the character (e.g., 'mike', 'grandfather')." },
+                            character_id: { type: "STRING", description: "A unique, simple, lowercase ID for the character (e.g., 'mikey', 'grandfather')." },
                             description: { type: "STRING", description: "A detailed visual description of the character's appearance and clothing." },
                             initial_expression: { type: "STRING", description: "The character's primary emotion or expression at the start of the scene." },
                             is_present_in_scene: { type: "BOOLEAN", description: "Set to true if the character is visually present in the illustration for this specific page, otherwise set to false." }
@@ -748,16 +825,15 @@
         const buildApiPromptText = (project, sceneId, feedback) => {
             const systemInstruction = `You are a precise and detail-oriented animation director. Your primary goal is to create a structured JSON animation prompt from a children's book page.
             
-            **CRITICAL RULES:**
-            1.  **Character Presence:** The illustration is the ONLY source of truth for determining WHICH CHARACTERS ARE PRESENT. For every known character in the story, you must include them in the 'characters' array and set 'is_present_in_scene' to 'true' or 'false' based ONLY on visual evidence in the current illustration.
-            2.  **Character Identity:** Decompose group descriptions (e.g., "a family") into individual character objects. If a new name appears in the text (e.g., "Poppy"), first determine if it is a nickname for an existing character before creating a new one. Assign simple, consistent, lowercase character_ids (e.g., 'mike', 'dad', 'grandfather').
-            3.  **Metadata, Not Text:** The 'character_id' field is a metadata tag for tracking. It MUST NOT be rendered as visible text in the final video.
-            4.  **Dynamic Animation:** Describe camera movements and character actions with dynamic, evocative, and cinematic language to create an engaging result.`;
+**CRITICAL RULES:**
+1.  **Character Presence is Gospel:** The illustration is the ONLY source of truth for determining WHICH CHARACTERS ARE VISUALLY PRESENT. For every known character in the story's glossary, you MUST include them in the 'characters' array and set 'is_present_in_scene' to 'true' or 'false' based ONLY on who you can see in the current illustration. Do not add characters who are not visible.
+2.  **Character Identity & Decomposition:** Decompose group descriptions (e.g., "a family") into individual character objects. If a new name appears in the text (e.g., "Poppy"), first determine if it is a nickname for an existing character from the glossary before creating a new one. Assign simple, consistent, lowercase character_ids (e.g., 'mike', 'dad', 'grandfather').
+3.  **Metadata, Not On-Screen Text:** The 'character_id' field is a metadata tag for tracking. It MUST NOT be rendered as visible text in the final video.
+4.  **Dynamic and Cinematic Animation:** Describe camera movements and character actions with dynamic, evocative, and cinematic language to create an engaging result.`;
             
             let taskInstruction = '';
             const sceneText = project.scenes[sceneId]?.text || '';
             
-            // --- Build a context block from previous scenes ---
             let establishedContext = "### Established Story Context\n";
             const characterGlossary = {};
             let establishedStyle = null;
@@ -786,7 +862,6 @@
              if (establishedStyle) {
                 establishedContext += `\n**Animation Style Guide:**\n- Style: ${establishedStyle.style}\n- Tone: ${establishedStyle.tone}\n- Palette: ${establishedStyle.color_palette}\n`;
             }
-            // --- End of context block ---
 
             if (sceneId === 'cover') {
                 taskInstruction = `Analyze the attached book cover image. Based on the visuals, generate a dynamic opening title sequence animation. Extract the book's title and author's name. Decompose all visible characters into individual objects with unique character_ids.`;
@@ -815,7 +890,6 @@
                 Now, populate the JSON schema based on all the rules and context provided.
             `;
         };
-        // ========= END OF MODIFIED CODE =========
 
         const generateScene = async (project, sceneId, imageBase64, feedback, setError) => {
             const textPrompt = buildApiPromptText(project, sceneId, feedback);
