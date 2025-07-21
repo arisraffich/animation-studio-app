@@ -5,8 +5,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Construct the Google Gemini API URL using the correct model and the API key from environment variables.
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    // Construct the Google Gemini API URL using a valid model and the API key.
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`;
     
     // Forward the request from the client to the Gemini API.
     const response = await fetch(geminiUrl, {
