@@ -316,7 +316,7 @@
                 } else {
                     setCurrentSceneId('cover');
                 }
-            }, [project.id, project.totalPages]); // Added project.totalPages to dependencies
+            }, [project.id, project.totalPages]);
 
             return (
                 <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col md:flex-row">
@@ -790,6 +790,7 @@
             }
         };
 
+        // ========= FINAL, IMPROVED PROMPT LOGIC =========
         const buildApiPromptText = (project, sceneId, feedback) => {
             const systemInstruction = `You are a precise and detail-oriented animation director. Your primary goal is to create a structured JSON animation prompt from a children's book page.
             
