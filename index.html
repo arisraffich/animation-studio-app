@@ -561,8 +561,6 @@
             };
             
             const handleGenerate = async () => {
-                // For a normal generation, an image is required (except for the end scene).
-                // For regeneration, an image is not required as we use the context from the previous generation.
                 if (sceneId !== 'end' && !imageBase64 && !isRegenerating) {
                     setError('Please upload an illustration for this page.');
                     return;
@@ -676,11 +674,7 @@
 
         const findStoryContent = async (allPagesText, setError) => {
             const promptText = `
-                You are a literary assistant. Analyze the following pages from a children's book.
-                Your task is to identify only the pages that contain the main story narrative.
-                Exclude pages that are only for titles, copyright information, dedications, table of contents, or back matter.
-                Return the result as a JSON object matching the provided schema. The 'story_pages' array should be ordered chronologically.
-
+                You are a literary assistant. Analyze the following pages from a children's book...
                 Here is the text from the pages:
                 ${allPagesText.map(p => `Page ${p.pageNum}: "${p.text}"`).join('\n')}
             `;
@@ -694,7 +688,6 @@
             };
 
             try {
-                // Use your proxy API instead of direct Gemini API call
                 const response = await fetch('/api/proxy', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -723,6 +716,7 @@
             }
         };
 
+        // ========= START OF MODIFIED CODE =========
         const animationPromptSchema = {
             type: "OBJECT",
             properties: {
@@ -730,7 +724,19 @@
                 scene_summary: { type: "STRING" },
                 animation_style: { type: "OBJECT", properties: { style: { type: "STRING" }, color_palette: { type: "STRING" }, tone: { type: "STRING" }}},
                 scene: { type: "OBJECT", properties: { location: { type: "STRING" }, time_of_day: { type: "STRING" }, environment_details: { type: "STRING" }}},
-                characters: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, description: { type: "STRING" }, initial_expression: { type: "STRING" }}}},
+                characters: {
+                    type: "ARRAY",
+                    items: {
+                        type: "OBJECT",
+                        properties: {
+                            character_id: { type: "STRING", description: "A unique, simple, lowercase ID for the character (e.g., 'mike', 'grandfather')." },
+                            description: { type: "STRING", description: "A detailed visual description of the character's appearance and clothing." },
+                            initial_expression: { type: "STRING", description: "The character's primary emotion or expression at the start of the scene." },
+                            is_present_in_scene: { type: "BOOLEAN", description: "Set to true if the character is visually present in the illustration for this specific page, otherwise set to false." }
+                        },
+                        required: ["character_id", "description", "initial_expression", "is_present_in_scene"]
+                    }
+                },
                 camera: { type: "OBJECT", properties: { shot_type: { type: "STRING" }, movement: { type: "STRING" }}},
                 action: { type: "OBJECT", properties: { primary_action: { type: "STRING" }, subtle_motions: { type: "STRING" }}},
                 metadata: { type: "OBJECT", properties: { estimated_duration_seconds: { type: "NUMBER" }, notes: { type: "STRING" }}},
@@ -740,17 +746,54 @@
         };
 
         const buildApiPromptText = (project, sceneId, feedback) => {
-            let systemInstruction = `You are an expert animation director for children's content. Your task is to analyze a single children's book scene (text and illustration) within the context of an entire story. You will generate a structured JSON object that serves as a technical animation prompt. All descriptions must be child-friendly and safe.`;
+            const systemInstruction = `You are a precise and detail-oriented animation director. Your primary goal is to create a structured JSON animation prompt from a children's book page.
+            
+            **CRITICAL RULES:**
+            1.  **Character Presence:** The illustration is the ONLY source of truth for determining WHICH CHARACTERS ARE PRESENT. For every known character in the story, you must include them in the 'characters' array and set 'is_present_in_scene' to 'true' or 'false' based ONLY on visual evidence in the current illustration.
+            2.  **Character Identity:** Decompose group descriptions (e.g., "a family") into individual character objects. If a new name appears in the text (e.g., "Poppy"), first determine if it is a nickname for an existing character before creating a new one. Assign simple, consistent, lowercase character_ids (e.g., 'mike', 'dad', 'grandfather').
+            3.  **Metadata, Not Text:** The 'character_id' field is a metadata tag for tracking. It MUST NOT be rendered as visible text in the final video.
+            4.  **Dynamic Animation:** Describe camera movements and character actions with dynamic, evocative, and cinematic language to create an engaging result.`;
+            
             let taskInstruction = '';
             const sceneText = project.scenes[sceneId]?.text || '';
-            const fullStoryContext = project.storyText || "No story context provided yet.";
+            
+            // --- Build a context block from previous scenes ---
+            let establishedContext = "### Established Story Context\n";
+            const characterGlossary = {};
+            let establishedStyle = null;
+
+            Object.values(project.scenes).forEach(scene => {
+                if (scene.status === 'completed' && scene.prompt && scene.prompt.characters) {
+                    scene.prompt.characters.forEach(char => {
+                        if (char.character_id && !characterGlossary[char.character_id]) {
+                            characterGlossary[char.character_id] = char.description;
+                        }
+                    });
+                    if (!establishedStyle && scene.prompt.animation_style) {
+                        establishedStyle = scene.prompt.animation_style;
+                    }
+                }
+            });
+
+            if (Object.keys(characterGlossary).length > 0) {
+                establishedContext += "\n**Character Glossary:**\n";
+                for (const [id, desc] of Object.entries(characterGlossary)) {
+                    establishedContext += `- ${id}: ${desc}\n`;
+                }
+            } else {
+                 establishedContext += "\nNo characters have been established yet.\n";
+            }
+             if (establishedStyle) {
+                establishedContext += `\n**Animation Style Guide:**\n- Style: ${establishedStyle.style}\n- Tone: ${establishedStyle.tone}\n- Palette: ${establishedStyle.color_palette}\n`;
+            }
+            // --- End of context block ---
 
             if (sceneId === 'cover') {
-                taskInstruction = `Analyze the attached book cover image. Based on the visuals, generate a dynamic opening title sequence animation. IMPORTANT: Also, extract the book's title and author's name from the cover image text. Populate the 'extracted_title' and 'extracted_author' fields in the JSON. The animation should hint at the story's main themes and characters.`;
+                taskInstruction = `Analyze the attached book cover image. Based on the visuals, generate a dynamic opening title sequence animation. Extract the book's title and author's name. Decompose all visible characters into individual objects with unique character_ids.`;
             } else if (sceneId === 'end') {
-                taskInstruction = `All pages are complete. Generate a concluding animation prompt. This should be a gentle, summary scene, perhaps a final shot of the main character or a pan across the main setting, evoking a feeling of happy resolution. Use the full story context for inspiration.`;
+                taskInstruction = `This is the final scene. Generate a concluding animation prompt. Use the Character Glossary to create a gentle, summary scene evoking a feeling of happy resolution.`;
             } else {
-                taskInstruction = `Analyze the attached illustration and its corresponding text for Page ${sceneId}. Generate a detailed animation prompt based on these assets, interpreted within the broader context of the full story provided below.`;
+                taskInstruction = `Analyze the attached illustration and its corresponding text for Page ${sceneId}. Generate a detailed animation prompt. Strictly follow all rules in the System Instruction, especially the 'Roll Call' for character presence based on the illustration.`;
             }
             
             if (feedback) {
@@ -758,17 +801,21 @@
             }
             
             return `
-                SYSTEM INSTRUCTION: ${systemInstruction}
-                FULL STORY CONTEXT:
-                ${fullStoryContext}
+                ${systemInstruction}
+                ---
+                ${establishedContext}
+                ---
+                FULL STORY NARRATIVE:
+                ${project.storyText}
                 ---
                 CURRENT SCENE ANALYSIS TASK:
                 - Scene ID: ${sceneId}
-                - Scene Text (if applicable): "${sceneText}"
+                - Scene Text: "${sceneText}"
                 - Task: ${taskInstruction}
-                Now, populate the JSON schema based on this task.
+                Now, populate the JSON schema based on all the rules and context provided.
             `;
         };
+        // ========= END OF MODIFIED CODE =========
 
         const generateScene = async (project, sceneId, imageBase64, feedback, setError) => {
             const textPrompt = buildApiPromptText(project, sceneId, feedback);
@@ -787,7 +834,6 @@
             };
 
             try {
-                // Use your proxy API instead of direct Gemini API call
                 const response = await fetch('/api/proxy', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
