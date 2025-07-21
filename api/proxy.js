@@ -1,5 +1,3 @@
-// /api/proxy.js
-
 export default async function handler(req, res) {
   // Only allow POST requests
   if (req.method !== 'POST') {
@@ -11,14 +9,12 @@ export default async function handler(req, res) {
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
     
     // Forward the request from the client to the Gemini API.
-    // The key fix is to pass req.body directly, which includes the
-    // contents, generationConfig, and the responseSchema.
     const response = await fetch(geminiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(req.body) // Pass the entire body from the client
+      body: JSON.stringify(req.body)
     });
 
     // Check if the request to the Gemini API was successful.
