@@ -470,11 +470,20 @@
                 }
             };
 
+            // --- BUG FIX: This function now correctly saves the totalPages ---
             const handleConfirmCoverInfo = ({ confirmedTitle, confirmedAuthor }) => {
                 const { initialProjectState, newPrompt } = pendingCoverInfo;
 
                 newPrompt.extracted_title = confirmedTitle;
                 newPrompt.extracted_author = confirmedAuthor;
+                
+                // Also update the title sequence if it exists
+                if (newPrompt.title_sequence) {
+                    newPrompt.title_sequence.forEach(step => {
+                        if (step.element_type === 'title') step.element_text = confirmedTitle;
+                        if (step.element_type === 'author') step.element_text = confirmedAuthor;
+                    });
+                }
 
                 const finalScenes = {
                     ...initialProjectState.scenes,
@@ -483,6 +492,7 @@
 
                 const finalProjectState = {
                     ...initialProjectState,
+                    totalPages: initialProjectState.totalPages, // Explicitly include totalPages
                     scenes: finalScenes,
                     name: confirmedTitle,
                     author: confirmedAuthor,
@@ -650,9 +660,7 @@
                         }
                     };
                     
-                    let projectUpdates = { scenes: updatedScenes };
-                    // Title/Author are now set via the confirmation modal, so no need to update here.
-
+                    const projectUpdates = { scenes: updatedScenes };
                     updateProject(project.id, projectUpdates);
 
                 } catch (err) {
@@ -720,21 +728,7 @@
 
         // --- Reusable API and Generation Logic ---
         const storyContentSchema = {
-            type: "OBJECT",
-            properties: {
-                story_pages: {
-                    type: "ARRAY",
-                    items: {
-                        type: "OBJECT",
-                        properties: {
-                            page_number: { type: "NUMBER" },
-                            text: { type: "STRING" }
-                        },
-                        required: ["page_number", "text"]
-                    }
-                }
-            },
-            required: ["story_pages"]
+            type: "OBJECT", properties: { story_pages: { type: "ARRAY", items: { type: "OBJECT", properties: { page_number: { type: "NUMBER" }, text: { type: "STRING" } }, required: ["page_number", "text"] } } }, required: ["story_pages"]
         };
 
         const findStoryContent = async (allPagesText, setError) => {
@@ -753,13 +747,11 @@
             }
         };
 
-        // ========= FINAL, IMPROVED SCHEMA AND PROMPT LOGIC =========
         const animationPromptSchema = {
             type: "OBJECT",
             properties: {
                 page_number: { type: "NUMBER" },
                 scene_summary: { type: "STRING" },
-                // --- NEW: Added title_sequence for cover animation ---
                 title_sequence: {
                     type: "ARRAY",
                     description: "An optional sequence of animation steps, used exclusively for the cover scene's title animation.",
@@ -840,14 +832,13 @@
                 establishedContext += `\n**Animation Style Guide:**\n- Style: ${establishedStyle.style}\n- Tone: ${establishedStyle.tone}\n- Palette: ${establishedStyle.color_palette}\n`;
             }
 
-            // --- UPDATED: Stricter and more detailed instructions for cover scene timeline ---
+            // --- BUG FIX: This instruction now asks for BOTH a timeline AND creative descriptions ---
             if (sceneId === 'cover') {
-                taskInstruction = `This is the COVER SCENE. Your task is to generate a structured title sequence.
+                taskInstruction = `This is the COVER SCENE. Your task is to generate a structured and visually dynamic title sequence.
 1.  **Extract Main Info:** Identify the main book Title and the Author's name. Populate the top-level 'extracted_title' and 'extracted_author' fields. IGNORE all other text like 'Illustrated by' or small taglines.
-2.  **Decompose Characters:** Identify all characters on the cover and create individual objects for them as per the system rules.
-3.  **Build Animation Timeline:** Create a 'title_sequence' array with separate, sequential steps for the title and author.
-    -   **Title Step:** Animate the book Title. You MUST use an ORDERLY animation style from this list: ['reveal word by word', 'gentle fade-in', 'letters assemble neatly from left to right']. AVOID chaotic, scattered, or jumbled letter effects.
-    -   **Author Step:** Animate the Author's name. This step's 'timing_start_seconds' MUST be greater than the title's 'timing_end_seconds'. Use a simple animation like 'gentle fade-in'.`;
+2.  **Build Animation Timeline:** Create a 'title_sequence' array with separate, sequential steps for the title and author. Use an ORDERLY animation style like 'reveal word by word' or 'gentle fade-in' and avoid chaotic effects. The author's animation MUST start after the title's animation ends.
+3.  **Describe the Overall Scene:** Crucially, ALSO fill out the top-level 'action', 'animation_style', and 'scene' fields with rich, dynamic, and creative descriptions for the entire sequence. Describe background elements and subtle motions to make the animation engaging. Do not leave 'subtle_motions' as 'None'.
+4.  **Add Director's Note:** In the 'metadata.notes' field, add a note to ensure the final text layout is clean and visually appealing, without duplicated words.`;
             } else if (sceneId === 'end') {
                 taskInstruction = `This is the final scene. Generate a concluding animation prompt. Use the Character Glossary to create a gentle, summary scene evoking a feeling of happy resolution.`;
             } else {
