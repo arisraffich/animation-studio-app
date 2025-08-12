@@ -3,12 +3,12 @@
   "version": "2.0.0",
   "description": "Animation Studio Application",
   "type": "module",
-  "main": "server.js",
+  "main": "server.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "node server.js",
+    "server": "node server.cjs",
     "start": "npm run build && npm run server"
   },
   "dependencies": {
