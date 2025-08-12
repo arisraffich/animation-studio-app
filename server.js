@@ -4,14 +4,23 @@ const app = express();
 
 const PORT = process.env.PORT || 8080;
 
-// Middleware
-app.use(express.json());
+// Increase the body size limit to 50MB (adjust as needed)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static('.'));
 
 // API proxy route
 app.post('/api/proxy', async (req, res) => {
+  // Check if API key exists
+  if (!process.env.GEMINI_API_KEY) {
+    console.error('GEMINI_API_KEY is not set in environment variables');
+    return res.status(500).json({ error: 'API key not configured' });
+  }
+
   try {
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    
+    console.log('Making request to Gemini API...');
     
     const response = await fetch(geminiUrl, {
       method: 'POST',
@@ -24,15 +33,22 @@ app.post('/api/proxy', async (req, res) => {
     if (!response.ok) {
       const errorBody = await response.text();
       console.error('Gemini API Error:', errorBody);
-      throw new Error(`Gemini API Error: ${response.status} - ${errorBody}`);
+      return res.status(response.status).json({ 
+        error: 'Gemini API Error', 
+        details: errorBody 
+      });
     }
 
     const data = await response.json();
+    console.log('Gemini API request successful');
     res.status(200).json(data);
 
   } catch (error) {
     console.error('Error in proxy handler:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+      error: 'Internal server error', 
+      details: error.message 
+    });
   }
 });
 
