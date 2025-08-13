@@ -1,6 +1,6 @@
-# Animation Studio - Universal Deployment Ready
+# Aura ✨
 
-A modern React application for creating animation prompts from children's books.
+An AI-powered animation studio with perfect regeneration magic - turning children's books into beautiful videos.
 
 ## 🚀 Quick Start
 
