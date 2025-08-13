@@ -10,7 +10,8 @@ export const VideoVersionViewer = ({
   uploadImageBase64 = null,
   isUploading = false,
   uploadLoadingMessage = 'Generating...',
-  isRegenerating = false
+  isRegenerating = false,
+  onDeleteVersion = null
 }) => {
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -420,8 +421,11 @@ export const VideoVersionViewer = ({
             <button
               onClick={(e) => {
                 e.stopPropagation(); // Prevent card click
-                // TODO: Add delete functionality
-                console.log('Delete video version:', card.id);
+                if (onDeleteVersion) {
+                  onDeleteVersion(card.id);
+                } else {
+                  console.log('Delete video version:', card.id);
+                }
               }}
               className="bg-red-500/90 hover:bg-red-500 text-white p-1.5 rounded-full transition-colors duration-200"
               aria-label={`Delete version ${card.version}`}

@@ -212,6 +212,59 @@ export const ProgressiveVideoGrid = ({
       setIsUploading(false);
     }
   };
+
+  // Handle individual video version deletion
+  const handleDeleteVersion = async (versionId) => {
+    try {
+      const existingScene = project.scenes[sceneId] || {};
+      const existingVersions = existingScene.videoVersions || [];
+      
+      // Filter out the deleted version
+      const remainingVersions = existingVersions.filter(v => v.id !== versionId);
+      
+      if (remainingVersions.length === 0) {
+        // Complete scene reset - delete everything
+        const updatedScenes = {
+          ...project.scenes,
+          [sceneId]: {
+            text: '',
+            status: 'pending'
+            // Clear: prompt, videoVersions, storedImage - everything
+          }
+        };
+        await updateProject(project.id, { scenes: updatedScenes });
+      } else {
+        // Just remove this version, update latest flag
+        const updatedVersions = remainingVersions.map(v => ({
+          ...v,
+          isLatest: false
+        }));
+        
+        // Make highest version number the new "latest"
+        if (updatedVersions.length > 0) {
+          const maxVersion = Math.max(...updatedVersions.map(v => v.version));
+          const latestVersion = updatedVersions.find(v => v.version === maxVersion);
+          if (latestVersion) {
+            latestVersion.isLatest = true;
+          }
+        }
+
+        const updatedScenes = {
+          ...project.scenes,
+          [sceneId]: {
+            ...existingScene,
+            videoVersions: updatedVersions,
+            prompt: updatedVersions.find(v => v.isLatest)?.prompt || existingScene.prompt
+          }
+        };
+        
+        await updateProject(project.id, { scenes: updatedScenes });
+      }
+    } catch (error) {
+      console.error('Error deleting video version:', error);
+      setError(`Failed to delete video version: ${error.message}`);
+    }
+  };
   
   return (
     <div className="space-y-6">
@@ -231,6 +284,7 @@ export const ProgressiveVideoGrid = ({
           isUploading={isUploading}
           uploadLoadingMessage={loadingMessage}
           isRegenerating={isRegenerating}
+          onDeleteVersion={handleDeleteVersion}
         />
       </div>
 
