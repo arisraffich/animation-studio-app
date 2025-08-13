@@ -530,7 +530,7 @@ export const ProgressiveVideoGrid = ({
           </div>
         </div>
       )}
-    </div>
+      </div>
     </>
   );
 };
