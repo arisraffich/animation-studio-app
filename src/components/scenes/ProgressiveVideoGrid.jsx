@@ -50,15 +50,6 @@ export const ProgressiveVideoGrid = ({
   // Initialize with stored image only when actually generating (not when just regenerating)
   const [useStoredImageForGeneration, setUseStoredImageForGeneration] = useState(false);
 
-  // Debug logging
-  console.log('ProgressiveVideoGrid Debug:', {
-    sceneId,
-    selectionMode,
-    selectedVersions: selectedVersions.size,
-    videoVersions: videoVersions.length,
-    hasExistingVideos,
-    legacyVideo
-  });
 
   const handleImageUpload = (file) => {
     const reader = new FileReader();
@@ -97,7 +88,6 @@ export const ProgressiveVideoGrid = ({
         ctx.drawImage(img, 0, 0, width, height);
         
         setUploadImageBase64(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
-        console.log(`Image uploaded - dimensions: ${originalDimensions.width}x${originalDimensions.height}`);
       };
       img.src = reader.result;
     };

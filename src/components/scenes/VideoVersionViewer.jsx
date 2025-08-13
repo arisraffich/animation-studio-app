@@ -123,7 +123,6 @@ export const VideoVersionViewer = ({
     // First priority: use PDF page dimensions if available
     if (project?.pageDimensions) {
       const { aspectRatio } = project.pageDimensions;
-      console.log('Using PDF aspect ratio:', aspectRatio);
       
       // Convert aspect ratio to standard Tailwind classes (thumbnail-sized, not actual PDF dimensions)
       if (aspectRatio >= 0.9 && aspectRatio <= 1.1) {
@@ -181,7 +180,6 @@ export const VideoVersionViewer = ({
   
   // Render unified card system
   const renderCard = (card, index) => {
-    console.log('Rendering card:', card, 'isUploadCard:', card.isUploadCard);
     const aspectRatioClass = getAspectRatioClass(card);
     
     // Upload card states
@@ -255,7 +253,6 @@ export const VideoVersionViewer = ({
       }
       
       // Empty upload state (or regeneration with stored image)
-      console.log('Rendering upload state with aspectRatio:', aspectRatioClass, 'showRegenerateUI:', showRegenerateUI);
       
       if (showRegenerateUI) {
         // Regeneration mode: Show stored image with transparent overlay
@@ -379,7 +376,6 @@ export const VideoVersionViewer = ({
     
     // Debug: Check if this card is selected
     const isSelected = selectedVersions.has(card.id);
-    console.log('Rendering card:', card.id, 'Selected:', isSelected, 'SelectionMode:', selectionMode);
     
     return (
       <div 
@@ -432,7 +428,6 @@ export const VideoVersionViewer = ({
               className="absolute top-2 left-2 z-10"
               onClick={(e) => {
                 e.stopPropagation();
-                console.log('Checkbox area clicked for card:', card.id);
                 onToggleVersionSelection && onToggleVersionSelection(card.id);
               }}
             >
@@ -440,7 +435,6 @@ export const VideoVersionViewer = ({
                 checked={isSelected}
                 onChange={(e) => {
                   e && e.stopPropagation && e.stopPropagation();
-                  console.log('Checkbox directly clicked for card:', card.id, 'Current state:', isSelected);
                   onToggleVersionSelection && onToggleVersionSelection(card.id);
                 }}
                 className="shadow-2xl ring-2 ring-white/50"
@@ -468,7 +462,6 @@ export const VideoVersionViewer = ({
                   if (onDeleteVersion) {
                     onDeleteVersion(card.id);
                   } else {
-                    console.log('Delete video version:', card.id);
                   }
                 }}
                 className="bg-red-500/90 hover:bg-red-500 text-white p-1.5 rounded-full transition-colors duration-200"
@@ -495,16 +488,6 @@ export const VideoVersionViewer = ({
     );
   };
 
-  // Debug logging
-  console.log('VideoVersionViewer Debug:', {
-    sceneId,
-    showUploadCard,
-    videosWithUrls: videosWithUrls.length,
-    totalCards: totalCards.length,
-    selectionMode,
-    selectedVersions: selectedVersions.size,
-    onToggleVersionSelection: !!onToggleVersionSelection
-  });
 
   return (
     <>

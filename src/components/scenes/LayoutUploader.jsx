@@ -46,7 +46,6 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
           height: viewport.height,
           aspectRatio: viewport.width / viewport.height
         };
-        console.log('PDF page dimensions:', pageDimensions);
       } else {
         throw new Error("Unsupported file type. Please upload a PDF file.");
       }
