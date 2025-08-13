@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "server": "node server.cjs",
-    "start": "npm run build && npm run server"
+    "start": "npm run build && node server.cjs"
   },
   "dependencies": {
     "dotenv": "^17.2.1",
