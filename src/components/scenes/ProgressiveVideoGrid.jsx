@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { VideoVersionViewer } from './VideoVersionViewer';
+import { ConfirmationModal } from '../common/ConfirmationModal';
 import { generateScene, generateVideoWithSeedance } from '../../services/api';
 
 export const ProgressiveVideoGrid = ({ 
@@ -19,6 +20,12 @@ export const ProgressiveVideoGrid = ({
   // Bulk selection state
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedVersions, setSelectedVersions] = useState(new Set());
+  
+  // Confirmation modal state
+  const [versionsToDelete, setVersionsToDelete] = useState([]);
+  const [isDeletingVersions, setIsDeletingVersions] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState('');
+  const [deleteError, setDeleteError] = useState(null);
   
   // Sync editableSceneText when project data changes
   useEffect(() => {
@@ -303,10 +310,34 @@ export const ProgressiveVideoGrid = ({
     setSelectedVersions(new Set());
   };
 
-  const bulkDeleteVersions = async () => {
+  // Show confirmation modal for bulk delete
+  const bulkDeleteVersions = () => {
     if (selectedVersions.size === 0) return;
     
+    const existingScene = project.scenes[sceneId] || {};
+    const existingVersions = existingScene.videoVersions || [];
+    const versionsToDelete = existingVersions.filter(v => selectedVersions.has(v.id));
+    
+    setVersionsToDelete(versionsToDelete);
+  };
+
+  // Actual bulk deletion after confirmation
+  const confirmBulkDelete = async () => {
     try {
+      setIsDeletingVersions(true);
+      setDeleteError(null);
+      
+      const isMultiple = versionsToDelete.length > 1;
+      const versionText = isMultiple ? `${versionsToDelete.length} video versions` : 'video version';
+      
+      setDeleteProgress(`Preparing to delete ${versionText}...`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      setDeleteProgress('Removing video files...');
+      await new Promise(resolve => setTimeout(resolve, 800));
+      
+      setDeleteProgress(`Deleting ${versionText}...`);
+      
       const existingScene = project.scenes[sceneId] || {};
       const existingVersions = existingScene.videoVersions || [];
       
@@ -351,16 +382,43 @@ export const ProgressiveVideoGrid = ({
         await updateProject(project.id, { scenes: updatedScenes });
       }
       
-      // Exit selection mode
+      setDeleteProgress('Cleaning up...');
+      
+      // Close modal and exit selection mode
+      setVersionsToDelete([]);
+      setIsDeletingVersions(false);
+      setDeleteProgress('');
       exitSelectionMode();
+      
     } catch (error) {
       console.error('Error bulk deleting versions:', error);
-      setError(`Failed to delete video versions: ${error.message}`);
+      setIsDeletingVersions(false);
+      setDeleteProgress('');
+      setDeleteError(`Failed to delete video versions: ${error.message}`);
     }
+  };
+
+  const cancelDelete = () => {
+    setVersionsToDelete([]);
+    setIsDeletingVersions(false);
+    setDeleteProgress('');
+    setDeleteError(null);
   };
   
   return (
-    <div className="space-y-6">
+    <>
+      <ConfirmationModal 
+        projects={versionsToDelete.map(v => ({ 
+          id: v.id, 
+          name: `Version ${v.version}` 
+        }))}
+        onConfirm={confirmBulkDelete} 
+        onCancel={cancelDelete}
+        isDeleting={isDeletingVersions}
+        deleteProgress={deleteProgress}
+        deleteError={deleteError}
+      />
+      <div className="space-y-6">
       {/* Show existing videos with upload card if regenerating */}
       <div>
         {hasExistingVideos || legacyVideo ? (
@@ -473,5 +531,6 @@ export const ProgressiveVideoGrid = ({
         </div>
       )}
     </div>
+    </>
   );
 };
