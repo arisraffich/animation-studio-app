@@ -7,13 +7,30 @@ const path = require('path');
 const app = express();
 
 const PORT = process.env.PORT || 8081;
+const fs = require('fs');
 
 // Increase the body size limit to 50MB (adjust as needed)
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Debug middleware to log requests
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
 // Serve static files with proper MIME types (Railway compatible)
-app.use(express.static(path.join(__dirname, 'dist')));
+app.use(express.static(path.join(__dirname, 'dist'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.js')) {
+      res.setHeader('Content-Type', 'application/javascript');
+    }
+    if (filePath.endsWith('.css')) {
+      res.setHeader('Content-Type', 'text/css');
+    }
+    console.log(`Serving static file: ${filePath}`);
+  }
+}));
 
 
 // Vidu API proxy routes
@@ -287,4 +304,18 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  
+  // Debug: Check if dist folder and assets exist
+  const distPath = path.join(__dirname, 'dist');
+  const assetsPath = path.join(__dirname, 'dist', 'assets');
+  
+  console.log('Dist folder exists:', fs.existsSync(distPath));
+  console.log('Assets folder exists:', fs.existsSync(assetsPath));
+  
+  if (fs.existsSync(distPath)) {
+    console.log('Dist contents:', fs.readdirSync(distPath));
+  }
+  if (fs.existsSync(assetsPath)) {
+    console.log('Assets contents:', fs.readdirSync(assetsPath));
+  }
 });
