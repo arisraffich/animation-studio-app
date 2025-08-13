@@ -468,7 +468,7 @@ export const generateVideoWithVeo3 = async (project, sceneId, imageBase64, feedb
   );
   
   // Wait 10 seconds before starting to poll
-  setLoadingMessage('Processing video with Google Veo-3 (this may take a few minutes)...');
+  setLoadingMessage('Processing video with Google Veo-3...');
   await new Promise(resolve => setTimeout(resolve, 10000));
   
   // Poll for completion
@@ -588,7 +588,7 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   const predictionId = await createSeedanceTask(imageBase64, seedancePrompt, imageDimensions, setError);
   
   // Wait 10 seconds before starting to poll
-  setLoadingMessage('Processing video (this may take a few minutes)...');
+  setLoadingMessage('Processing video...');
   await new Promise(resolve => setTimeout(resolve, 10000));
   
   // Poll for completion
