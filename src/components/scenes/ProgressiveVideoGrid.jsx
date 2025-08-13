@@ -46,12 +46,11 @@ export const ProgressiveVideoGrid = ({
   // Debug logging
   console.log('ProgressiveVideoGrid Debug:', {
     sceneId,
-    sceneData,
-    videoVersions,
+    selectionMode,
+    selectedVersions: selectedVersions.size,
+    videoVersions: videoVersions.length,
     hasExistingVideos,
-    legacyVideo,
-    hasStoredImage,
-    showUploadCard: isRegenerating || (!hasExistingVideos && !legacyVideo)
+    legacyVideo
   });
 
   const handleImageUpload = (file) => {
@@ -365,45 +364,58 @@ export const ProgressiveVideoGrid = ({
       {/* Show existing videos with upload card if regenerating */}
       <div>
         {hasExistingVideos || legacyVideo ? (
-          <div className="flex items-center justify-between mb-4">
-            <h4 className="text-lg font-semibold text-gray-200">Generated Videos</h4>
-            
-            {/* Bulk selection controls */}
-            <div className="flex items-center gap-2">
-              {!selectionMode ? (
+          <div className="flex items-center gap-3 mb-4">
+            {!selectionMode ? (
+              <button
+                onClick={enterSelectionMode}
+                className="flex items-center gap-2 text-sm bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3 py-2 rounded-lg border border-gray-600 hover:border-gray-500 transition-all duration-200"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="2"/>
+                  <path d="m9 12 2 2 4-4" strokeWidth="2"/>
+                </svg>
+                Select Videos
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={enterSelectionMode}
-                  className="text-sm text-gray-400 hover:text-gray-300 transition-colors"
+                  onClick={toggleSelectAll}
+                  className="flex items-center gap-2 text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors duration-200"
                 >
-                  Select
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="2"/>
+                    {selectedVersions.size === videoVersions.filter(v => v.prompt?.video_url).length ? (
+                      <path d="m9 12 2 2 4-4" strokeWidth="2"/>
+                    ) : (
+                      <path d="M12 8v8M8 12h8" strokeWidth="2"/>
+                    )}
+                  </svg>
+                  {selectedVersions.size === videoVersions.filter(v => v.prompt?.video_url).length ? 'Deselect All' : 'Select All'}
                 </button>
-              ) : (
-                <div className="flex items-center gap-2">
+                
+                {selectedVersions.size > 0 && (
                   <button
-                    onClick={toggleSelectAll}
-                    className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                    onClick={bulkDeleteVersions}
+                    className="flex items-center gap-2 text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg transition-colors duration-200"
                   >
-                    {selectedVersions.size === videoVersions.filter(v => v.prompt?.video_url).length ? 'Deselect All' : 'Select All'}
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h0M10 11v6M14 11v6" strokeWidth="2"/>
+                    </svg>
+                    Delete ({selectedVersions.size})
                   </button>
-                  
-                  {selectedVersions.size > 0 && (
-                    <button
-                      onClick={bulkDeleteVersions}
-                      className="text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-300 px-2 py-1 rounded transition-colors"
-                    >
-                      Delete ({selectedVersions.size})
-                    </button>
-                  )}
-                  
-                  <button
-                    onClick={exitSelectionMode}
-                    className="text-sm text-gray-400 hover:text-gray-300 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
+                )}
+                
+                <button
+                  onClick={exitSelectionMode}
+                  className="flex items-center gap-2 text-sm bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded-lg transition-colors duration-200"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 18L18 6M6 6l12 12" strokeWidth="2"/>
+                  </svg>
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         ) : null}
         

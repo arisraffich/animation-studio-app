@@ -377,15 +377,19 @@ export const VideoVersionViewer = ({
       ? `data:image/jpeg;base64,${storedImageData.base64}` 
       : card.prompt?.cover_url || '';
     
+    // Debug: Check if this card is selected
+    const isSelected = selectedVersions.has(card.id);
+    console.log('Rendering card:', card.id, 'Selected:', isSelected, 'SelectionMode:', selectionMode);
+    
     return (
       <div 
         key={card.id}
-        className={`bg-gray-900 border border-gray-700 rounded-xl overflow-hidden transition-all duration-200 cursor-pointer group ${aspectRatioClass} ${
+        className={`bg-gray-900 rounded-xl overflow-hidden transition-all duration-200 cursor-pointer group ${aspectRatioClass} ${
           selectionMode 
-            ? selectedVersions.has(card.id) 
-              ? 'border-blue-500 bg-blue-500/10' 
-              : 'border-gray-700 hover:border-blue-400'
-            : 'hover:border-blue-500'
+            ? isSelected 
+              ? 'border-2 border-blue-500 bg-blue-500/10 shadow-lg shadow-blue-500/20' 
+              : 'border-2 border-gray-700 hover:border-blue-400'
+            : 'border border-gray-700 hover:border-blue-500'
         }`}
         onClick={() => {
           if (selectionMode && onToggleVersionSelection) {
@@ -424,11 +428,23 @@ export const VideoVersionViewer = ({
           
           {/* Checkbox in selection mode, otherwise version badge */}
           {selectionMode ? (
-            <div className="absolute top-2 left-2">
+            <div 
+              className="absolute top-2 left-2 z-10"
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log('Checkbox area clicked for card:', card.id);
+                onToggleVersionSelection && onToggleVersionSelection(card.id);
+              }}
+            >
               <Checkbox
-                checked={selectedVersions.has(card.id)}
-                onChange={() => onToggleVersionSelection && onToggleVersionSelection(card.id)}
-                className="bg-white/90 backdrop-blur-sm"
+                checked={isSelected}
+                onChange={(e) => {
+                  e && e.stopPropagation && e.stopPropagation();
+                  console.log('Checkbox directly clicked for card:', card.id, 'Current state:', isSelected);
+                  onToggleVersionSelection && onToggleVersionSelection(card.id);
+                }}
+                className="shadow-2xl ring-2 ring-white/50"
+                size="lg"
               />
             </div>
           ) : (
@@ -485,7 +501,9 @@ export const VideoVersionViewer = ({
     showUploadCard,
     videosWithUrls: videosWithUrls.length,
     totalCards: totalCards.length,
-    totalCardsContent: totalCards
+    selectionMode,
+    selectedVersions: selectedVersions.size,
+    onToggleVersionSelection: !!onToggleVersionSelection
   });
 
   return (
