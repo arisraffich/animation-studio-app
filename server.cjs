@@ -12,8 +12,8 @@ const PORT = process.env.PORT || 8081;
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Serve static files from dist directory (built files)
-app.use(express.static(path.join(__dirname, 'dist'), {
+// Serve static files from dist directory (built files) with explicit paths
+app.use('/assets', express.static(path.join(__dirname, 'dist', 'assets'), {
   setHeaders: (res, path) => {
     if (path.endsWith('.js')) {
       res.setHeader('Content-Type', 'application/javascript');
@@ -22,6 +22,11 @@ app.use(express.static(path.join(__dirname, 'dist'), {
       res.setHeader('Content-Type', 'text/css');
     }
   }
+}));
+
+// Serve other static files (favicon, etc.)
+app.use(express.static(path.join(__dirname, 'dist'), {
+  index: false, // Don't serve index.html automatically
 }));
 
 
