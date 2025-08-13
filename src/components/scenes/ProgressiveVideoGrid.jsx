@@ -16,6 +16,10 @@ export const ProgressiveVideoGrid = ({
   const [loadingMessage, setLoadingMessage] = useState('Generating...');
   const [editableSceneText, setEditableSceneText] = useState(project.scenes[sceneId]?.text || '');
   
+  // Bulk selection state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedVersions, setSelectedVersions] = useState(new Set());
+  
   // Sync editableSceneText when project data changes
   useEffect(() => {
     const currentText = project.scenes[sceneId]?.text || '';
@@ -265,13 +269,142 @@ export const ProgressiveVideoGrid = ({
       setError(`Failed to delete video version: ${error.message}`);
     }
   };
+
+  // Bulk selection functions
+  const toggleVersionSelection = (versionId) => {
+    setSelectedVersions(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(versionId)) {
+        newSet.delete(versionId);
+      } else {
+        newSet.add(versionId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const allVersions = videoVersions.filter(v => v.prompt?.video_url);
+    if (selectedVersions.size === allVersions.length) {
+      // Deselect all
+      setSelectedVersions(new Set());
+    } else {
+      // Select all
+      setSelectedVersions(new Set(allVersions.map(v => v.id)));
+    }
+  };
+
+  const enterSelectionMode = () => {
+    setSelectionMode(true);
+    setSelectedVersions(new Set());
+  };
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedVersions(new Set());
+  };
+
+  const bulkDeleteVersions = async () => {
+    if (selectedVersions.size === 0) return;
+    
+    try {
+      const existingScene = project.scenes[sceneId] || {};
+      const existingVersions = existingScene.videoVersions || [];
+      
+      // Filter out deleted versions
+      const remainingVersions = existingVersions.filter(v => !selectedVersions.has(v.id));
+      
+      if (remainingVersions.length === 0) {
+        // Complete scene reset
+        const updatedScenes = {
+          ...project.scenes,
+          [sceneId]: {
+            text: '',
+            status: 'pending'
+          }
+        };
+        await updateProject(project.id, { scenes: updatedScenes });
+      } else {
+        // Update remaining versions
+        const updatedVersions = remainingVersions.map(v => ({
+          ...v,
+          isLatest: false
+        }));
+        
+        // Make highest version the latest
+        if (updatedVersions.length > 0) {
+          const maxVersion = Math.max(...updatedVersions.map(v => v.version));
+          const latestVersion = updatedVersions.find(v => v.version === maxVersion);
+          if (latestVersion) {
+            latestVersion.isLatest = true;
+          }
+        }
+
+        const updatedScenes = {
+          ...project.scenes,
+          [sceneId]: {
+            ...existingScene,
+            videoVersions: updatedVersions,
+            prompt: updatedVersions.find(v => v.isLatest)?.prompt || existingScene.prompt
+          }
+        };
+        
+        await updateProject(project.id, { scenes: updatedScenes });
+      }
+      
+      // Exit selection mode
+      exitSelectionMode();
+    } catch (error) {
+      console.error('Error bulk deleting versions:', error);
+      setError(`Failed to delete video versions: ${error.message}`);
+    }
+  };
   
   return (
     <div className="space-y-6">
       {/* Show existing videos with upload card if regenerating */}
       <div>
         {hasExistingVideos || legacyVideo ? (
-          <h4 className="text-lg font-semibold text-gray-200 mb-4">Generated Videos</h4>
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-lg font-semibold text-gray-200">Generated Videos</h4>
+            
+            {/* Bulk selection controls */}
+            <div className="flex items-center gap-2">
+              {!selectionMode ? (
+                <button
+                  onClick={enterSelectionMode}
+                  className="text-sm text-gray-400 hover:text-gray-300 transition-colors"
+                >
+                  Select
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={toggleSelectAll}
+                    className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                  >
+                    {selectedVersions.size === videoVersions.filter(v => v.prompt?.video_url).length ? 'Deselect All' : 'Select All'}
+                  </button>
+                  
+                  {selectedVersions.size > 0 && (
+                    <button
+                      onClick={bulkDeleteVersions}
+                      className="text-sm bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-300 px-2 py-1 rounded transition-colors"
+                    >
+                      Delete ({selectedVersions.size})
+                    </button>
+                  )}
+                  
+                  <button
+                    onClick={exitSelectionMode}
+                    className="text-sm text-gray-400 hover:text-gray-300 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         ) : null}
         
         <VideoVersionViewer 
@@ -285,6 +418,9 @@ export const ProgressiveVideoGrid = ({
           uploadLoadingMessage={loadingMessage}
           isRegenerating={isRegenerating}
           onDeleteVersion={handleDeleteVersion}
+          selectionMode={selectionMode}
+          selectedVersions={selectedVersions}
+          onToggleVersionSelection={toggleVersionSelection}
         />
       </div>
 

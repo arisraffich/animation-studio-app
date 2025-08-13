@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Play, Maximize, X, Loader2, UploadCloud, RefreshCw, Trash2 } from '../common/Icons';
+import { Checkbox } from '../common/Checkbox';
 
 export const VideoVersionViewer = ({ 
   sceneId, 
@@ -11,7 +12,11 @@ export const VideoVersionViewer = ({
   isUploading = false,
   uploadLoadingMessage = 'Generating...',
   isRegenerating = false,
-  onDeleteVersion = null
+  onDeleteVersion = null,
+  selectionMode = false,
+  selectedVersions = new Set(),
+  onToggleVersionSelection = null,
+  onBulkDelete = null
 }) => {
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -375,8 +380,20 @@ export const VideoVersionViewer = ({
     return (
       <div 
         key={card.id}
-        className={`bg-gray-900 border border-gray-700 rounded-xl overflow-hidden hover:border-blue-500 transition-all duration-200 cursor-pointer group ${aspectRatioClass}`}
-        onClick={() => handleClick(card)}
+        className={`bg-gray-900 border border-gray-700 rounded-xl overflow-hidden transition-all duration-200 cursor-pointer group ${aspectRatioClass} ${
+          selectionMode 
+            ? selectedVersions.has(card.id) 
+              ? 'border-blue-500 bg-blue-500/10' 
+              : 'border-gray-700 hover:border-blue-400'
+            : 'hover:border-blue-500'
+        }`}
+        onClick={() => {
+          if (selectionMode && onToggleVersionSelection) {
+            onToggleVersionSelection(card.id);
+          } else {
+            handleClick(card);
+          }
+        }}
       >
         <div className="relative w-full h-full">
           {/* Use image as thumbnail instead of video element */}
@@ -405,34 +422,46 @@ export const VideoVersionViewer = ({
           {/* Hover overlay */}
           <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
           
-          {/* Version badge */}
-          <div className="absolute top-2 left-2">
-            <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-              card.isLatest 
-                ? 'bg-blue-500 text-white' 
-                : 'bg-gray-700 text-gray-300'
-            }`}>
-              v{card.version}
-            </span>
-          </div>
+          {/* Checkbox in selection mode, otherwise version badge */}
+          {selectionMode ? (
+            <div className="absolute top-2 left-2">
+              <Checkbox
+                checked={selectedVersions.has(card.id)}
+                onChange={() => onToggleVersionSelection && onToggleVersionSelection(card.id)}
+                className="bg-white/90 backdrop-blur-sm"
+              />
+            </div>
+          ) : (
+            <div className="absolute top-2 left-2">
+              <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                card.isLatest 
+                  ? 'bg-blue-500 text-white' 
+                  : 'bg-gray-700 text-gray-300'
+              }`}>
+                v{card.version}
+              </span>
+            </div>
+          )}
 
-          {/* Delete icon - top right corner */}
-          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            <button
-              onClick={(e) => {
-                e.stopPropagation(); // Prevent card click
-                if (onDeleteVersion) {
-                  onDeleteVersion(card.id);
-                } else {
-                  console.log('Delete video version:', card.id);
-                }
-              }}
-              className="bg-red-500/90 hover:bg-red-500 text-white p-1.5 rounded-full transition-colors duration-200"
-              aria-label={`Delete version ${card.version}`}
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
+          {/* Delete icon - top right corner (hidden in selection mode) */}
+          {!selectionMode && (
+            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent card click
+                  if (onDeleteVersion) {
+                    onDeleteVersion(card.id);
+                  } else {
+                    console.log('Delete video version:', card.id);
+                  }
+                }}
+                className="bg-red-500/90 hover:bg-red-500 text-white p-1.5 rounded-full transition-colors duration-200"
+                aria-label={`Delete version ${card.version}`}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          )}
         </div>
         
         {/* Video info */}
