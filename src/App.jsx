@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ProjectsDashboard } from './components/dashboard/ProjectsDashboard';
 import { ProjectWorkspace } from './components/workspace/ProjectWorkspace';
 import { ConfirmationModal } from './components/common/ConfirmationModal';
