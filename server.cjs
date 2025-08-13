@@ -12,22 +12,8 @@ const PORT = process.env.PORT || 8081;
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Serve static files from dist directory (built files) with explicit paths
-app.use('/assets', express.static(path.join(__dirname, 'dist', 'assets'), {
-  setHeaders: (res, path) => {
-    if (path.endsWith('.js')) {
-      res.setHeader('Content-Type', 'application/javascript');
-    }
-    if (path.endsWith('.css')) {
-      res.setHeader('Content-Type', 'text/css');
-    }
-  }
-}));
-
-// Serve other static files (favicon, etc.)
-app.use(express.static(path.join(__dirname, 'dist'), {
-  index: false, // Don't serve index.html automatically
-}));
+// Serve static files with proper MIME types (Railway compatible)
+app.use(express.static(path.join(__dirname, 'dist')));
 
 
 // Vidu API proxy routes
@@ -282,9 +268,21 @@ app.post('/api/openai', async (req, res) => {
   }
 });
 
-// Serve index.html for all other routes (SPA support)
+// Serve index.html for all other routes (SPA support) - but not for assets
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  // Don't serve index.html for asset requests
+  if (req.path.startsWith('/assets/')) {
+    return res.status(404).send('Asset not found');
+  }
+  
+  const indexPath = path.join(__dirname, 'dist', 'index.html');
+  
+  // Check if index.html exists
+  if (require('fs').existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(500).send('Build files not found. Please run npm run build');
+  }
 });
 
 app.listen(PORT, () => {
