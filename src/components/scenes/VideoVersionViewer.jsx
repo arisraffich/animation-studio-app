@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Maximize, X, Loader2, UploadCloud, RefreshCw } from '../common/Icons';
+import { Play, Maximize, X, Loader2, UploadCloud, RefreshCw, Trash2 } from '../common/Icons';
 
 export const VideoVersionViewer = ({ 
   sceneId, 
@@ -413,6 +413,21 @@ export const VideoVersionViewer = ({
             }`}>
               v{card.version}
             </span>
+          </div>
+
+          {/* Delete icon - top right corner */}
+          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <button
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent card click
+                // TODO: Add delete functionality
+                console.log('Delete video version:', card.id);
+              }}
+              className="bg-red-500/90 hover:bg-red-500 text-white p-1.5 rounded-full transition-colors duration-200"
+              aria-label={`Delete version ${card.version}`}
+            >
+              <Trash2 size={14} />
+            </button>
           </div>
         </div>
         
