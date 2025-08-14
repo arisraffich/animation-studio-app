@@ -1,6 +1,6 @@
 {
   "name": "aura",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Aura - AI-powered animation studio with perfect regeneration magic",
   "type": "module",
   "main": "server.cjs",
