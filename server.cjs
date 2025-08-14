@@ -219,8 +219,8 @@ app.post('/api/openai', async (req, res) => {
 // Serve index.html for all other routes (SPA support) - but not for assets
 app.get('*', (req, res) => {
   // Don't serve index.html for asset requests
-  if (req.path.startsWith('/assets/')) {
-    return res.status(404).send('Asset not found');
+  if (req.path.startsWith('/assets/') || req.path.match(/\.(js|css|png|jpg|svg)$/)) {
+    return res.status(404).json({ error: 'Asset not found' });
   }
   
   const indexPath = path.join(__dirname, 'dist', 'index.html');
