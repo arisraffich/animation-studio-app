@@ -15,7 +15,7 @@ Transform static illustrations into animated videos with AI-powered scene genera
 - **Frontend**: React + Vite + Tailwind CSS
 - **Backend**: Node.js + Express
 - **AI Services**: 
-  - OpenAI GPT-4o (scene analysis & prompt generation)
+  - OpenAI GPT-5 (enhanced scene analysis & prompt generation)
   - Replicate Seedance (video generation)
 - **Database**: Firebase Firestore
 - **Deployment**: Railway
@@ -59,7 +59,7 @@ npm start
 
 ## API Endpoints
 
-- `/api/openai` - OpenAI proxy for scene analysis
+- `/api/openai` - OpenAI GPT-5 proxy for enhanced scene analysis
 - `/api/seedance/create` - Create Seedance video generation task
 - `/api/seedance/status/:id` - Check video generation status
 

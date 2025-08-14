@@ -180,14 +180,14 @@ app.get('/api/seedance/status/:predictionId', async (req, res) => {
   }
 });
 
-// OpenAI GPT-5 API endpoint
+// OpenAI GPT-5 Responses API endpoint
 app.post('/api/openai', async (req, res) => {
   if (!process.env.OPENAI_API_KEY) {
     return res.status(500).json({ error: 'OpenAI API key not configured' });
   }
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -198,9 +198,9 @@ app.post('/api/openai', async (req, res) => {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error('OpenAI API Error:', errorBody);
+      console.error('OpenAI GPT-5 API Error:', errorBody);
       return res.status(response.status).json({ 
-        error: 'OpenAI API Error', 
+        error: 'OpenAI GPT-5 API Error', 
         details: errorBody 
       });
     }
@@ -208,7 +208,7 @@ app.post('/api/openai', async (req, res) => {
     const data = await response.json();
     res.status(200).json(data);
   } catch (error) {
-    console.error('Error in OpenAI proxy:', error);
+    console.error('Error in OpenAI GPT-5 proxy:', error);
     res.status(500).json({ 
       error: 'Internal server error', 
       details: error.message 

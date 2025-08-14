@@ -1,34 +1,35 @@
-import { storyContentSchema, animationPromptSchema } from './schemas';
+import { storyContentSchema, coverAnalysisSchema, animationPromptSchema } from './schemas';
 
-// Extract story content from PDF pages using OpenAI
+// Extract story content from PDF pages using GPT-5
 export const findStoryContent = async (allPagesText, setError) => {
-  const promptText = `You are a literary assistant. Analyze the following pages from a children's book and extract the main story content.
+  const promptText = `Analyze these PDF pages and identify which contain the main story narrative.
 
-TASK: Identify which pages contain the primary narrative story (not title pages, copyright pages, or back matter).
-
-PAGES TO ANALYZE:
+PAGES:
 ${allPagesText.map(p => `Page ${p.pageNum}: "${p.text}"`).join('\n')}
 
-RULES:
-- Include only pages with main story narrative
-- Exclude title pages, copyright, acknowledgments, etc.
-- Keep original page numbers
-- Preserve the exact text content`;
+INCLUDE: Pages with narrative, dialogue, character actions, story events
+EXCLUDE: Title pages, copyright, dedications, "The End" pages, blank pages, publisher info
+
+Return story pages with clean narrative text (remove page numbers from beginning of text).`;
 
   const payload = {
-    model: "gpt-4o-2024-08-06",
-    messages: [
+    model: "gpt-5",
+    input: [
       {
-        role: "user",
-        content: promptText
+        role: "user", 
+        content: [
+          { type: "input_text", text: promptText }
+        ]
       }
     ],
-    response_format: {
-      type: "json_schema",
-      json_schema: storyContentSchema
+    text: {
+      format: {
+        type: "json_schema",
+        name: storyContentSchema.name,
+        schema: storyContentSchema.schema
+      }
     },
-    max_tokens: 2000,
-    temperature: 0.7
+    max_output_tokens: 2000
   };
 
   try {
@@ -40,19 +41,33 @@ RULES:
 
     if (!response.ok) {
       const errorBody = await response.text();
-      throw new Error(`OpenAI API Error: ${response.status} ${response.statusText} - ${errorBody}`);
+      throw new Error(`OpenAI GPT-5 API Error: ${response.status} ${response.statusText} - ${errorBody}`);
     }
 
     const result = await response.json();
+    console.log('Full GPT-5 Story Content Response:', JSON.stringify(result, null, 2));
     
-    if (result.choices && result.choices.length > 0 && result.choices[0].message.content) {
-      const parsedJson = JSON.parse(result.choices[0].message.content);
-      console.log('OpenAI Structured Output - Story Content:', parsedJson);
-      return parsedJson.story_pages;
-    } else {
-      console.error("OpenAI Response for story content was empty or invalid:", result);
-      throw new Error('OpenAI returned an empty or invalid response for story content.');
+    if (result.output && result.output.length > 0) {
+      const messageOutput = result.output.find(output => output.type === 'message');
+      console.log('Message output found:', messageOutput);
+      
+      if (messageOutput && messageOutput.content && messageOutput.content[0] && messageOutput.content[0].text) {
+        console.log('Raw JSON text:', messageOutput.content[0].text);
+        try {
+          const parsedJson = JSON.parse(messageOutput.content[0].text);
+          console.log('GPT-5 Enhanced Story Content Analysis:', parsedJson);
+          return parsedJson.story_pages;
+        } catch (parseError) {
+          console.error('JSON parsing failed:', parseError.message);
+          console.error('Failed at character position:', parseError.message.match(/column (\d+)/)?.[1] || 'unknown');
+          throw new Error(`GPT-5 returned malformed JSON: ${parseError.message}`);
+        }
+      }
     }
+    
+    // If no message output found, GPT-5 might have only reasoning output (token limit exceeded)
+    console.error("GPT-5 used all tokens for reasoning, no message output produced. Consider simplifying the prompt or increasing token limit.");
+    throw new Error('GPT-5 analysis incomplete - try with shorter content or simpler prompts.');
   } catch (err) {
     console.error("Error in findStoryContent:", err);
     setError(err.message);
@@ -77,111 +92,44 @@ const buildSeedancePromptText = (project, sceneId, feedback) => {
     taskInstruction += `\n\nREGENERATION FEEDBACK: Please adjust based on this feedback: "${feedback}"`;
   }
 
-  return `You are a professional animation director specializing in children's book video adaptations. Your job is to create a single, cinematic video prompt that brings this illustration to life while preserving its artistic composition and maintaining story context.
+  return `Create a simple video prompt for this scene: "${sceneText}"
 
-CRITICAL RULES:
-1. PRESERVE COMPOSITION: Maintain the illustration's exact camera angle, shot type (wide/medium/close-up), and visual framing. DO NOT change what the illustrator created.
-2. ADD LIFE THROUGH MOTION: Introduce gentle, natural movements that enhance the scene without overwhelming it.
-3. MAINTAIN STORY TONE: Keep the emotional atmosphere and pacing appropriate for this moment in the story.
-4. CHILDREN'S CONTENT: All motion should be gentle, peaceful, and appropriate for young audiences.
-5. FOLLOW USER INSTRUCTIONS: If the user provides specific instructions in the scene text, YOU MUST incorporate them EXACTLY as requested. Do not ignore user requirements.
-
-ANALYSIS STEPS:
-1. Identify the shot type shown in the illustration (wide establishing shot, medium shot, close-up, etc.)
-2. Observe the main subjects and their positioning
-3. Note the environmental elements that could have gentle motion
-4. Consider the story context and emotional tone
-5. Determine appropriate subtle character movements if any
-
-OUTPUT FORMAT:
-[Shot type matching illustration] Main scene description with gentle motion added. Environmental atmosphere and lighting. Subtle secondary movements.
-
-MOTION GUIDELINES:
-- Environmental: leaves rustling, water flowing, clouds drifting, grass swaying
-- Character: breathing, blinking, slight head movements, natural posture shifts  
-- Atmospheric: soft lighting changes, gentle shadows, mist or steam
-- Avoid: sudden movements, dramatic changes, anything startling or intense
-
-EXAMPLE OUTPUTS:
-- [Wide establishing shot] A cozy cottage sits in a meadow as morning mist gently rises from the grass. Soft sunlight filters through nearby trees, casting dappled shadows. Chimney smoke drifts lazily upward while wildflowers sway softly in the breeze.
-- [Medium close-up shot] A curious rabbit sits by a babbling brook, ears twitching slightly as it listens to the water. Dappled sunlight shifts gently through overhead branches. Small ripples move across the brook's surface while nearby flowers bob softly.
-
-CONTEXT PROVIDED:
-- Full Story: ${project.storyText}
-- Current Scene Text: "${sceneText}"
-- Scene ID: ${sceneId}
-- Task: ${taskInstruction}
-
-IMPORTANT: Pay special attention to any SPECIFIC INSTRUCTIONS in the scene text. If the user has added requirements like "keep the toy the same size", "maintain object proportions", or any other specific directives, you MUST incorporate these into your video prompt.
-
-Now analyze the provided illustration and create a single video prompt that brings it to life while preserving its artistic vision AND following any user-specified requirements.
-
-Your response should be ONLY the video prompt text - no explanations, no additional text, no JSON structure.`;
+Keep it to 1-2 sentences. Focus mainly on character movements (people and animals), with minimal environment details.`;
 };
 
 // Build structured animation prompt for OpenAI
 const buildApiPromptText = (project, sceneId, feedback) => {
-  const systemInstruction = `You are a precise and detail-oriented animation director. Your primary goal is to create a structured JSON animation prompt from a children's book page.
-  
-**CRITICAL RULES:**
-1.  **Focus on Visual Elements:** Analyze the illustration and describe the scene, characters, and environment concisely. 
-2.  **Characters Summary:** Use the 'characters_summary' field to briefly describe key characters visible in the scene without complex tracking.
-3.  **Dynamic and Cinematic Animation:** Describe camera movements and character actions with dynamic, evocative, and cinematic language to create an engaging result.
-4.  **Keep It Simple:** Focus on creating engaging animation prompts without unnecessary complexity.`;
+  const systemInstruction = `Create a concise animation prompt from this children's book page. Keep each field to 1-2 short sentences maximum. Focus on essential visual elements and simple motion.`;
   
   let taskInstruction = '';
   const sceneText = project.scenes[sceneId]?.text || '';
   
-  // Simplified context - no complex character tracking
-  let establishedContext = "### Established Story Context\n";
-  let establishedStyle = null;
-
-  Object.values(project.scenes).forEach(scene => {
-    if (scene.status === 'completed' && scene.prompt && scene.prompt.animation_style) {
-      if (!establishedStyle) {
-        establishedStyle = scene.prompt.animation_style;
-      }
-    }
-  });
-  
-  if (establishedStyle) {
-    establishedContext += `\n**Animation Style Guide:**\n- Style: ${establishedStyle.style}\n- Tone: ${establishedStyle.tone}\n- Palette: ${establishedStyle.color_palette}\n`;
-  } else {
-    establishedContext += "\nNo established animation style yet.\n";
-  }
-
   if (sceneId === 'cover') {
-    taskInstruction = `This is the COVER SCENE. Your task is to generate a structured and visually dynamic title sequence.
-    1.  **Extract Main Info:** Identify the main book Title and the Author's name. Populate the top-level 'extracted_title' and 'extracted_author' fields. IGNORE all other text like 'Illustrated by' or small taglines.
-    2.  **Describe the Overall Scene:** Crucially, analyze the visual elements of the cover illustration (characters, setting, mood). Describe a dynamic, animated version of this scene in the main 'action', 'scene', and 'animation_style' fields. Make it engaging and hint at the story's themes. Do not leave 'subtle_motions' as 'None'. For example, describe an animated background based on the cover art.
-    3.  **Build Animation Timeline:** Create a 'title_sequence' array with separate, sequential steps for the title and author. Use an ORDERLY animation style like 'reveal word by word' or 'gentle fade-in' and AVOID chaotic, scattered effects. The author's animation MUST start after the title's animation ends. For multi-line titles, create a separate step for each line.
-    4.  **Add Director's Note:** In the 'metadata.notes' field, add a note to ensure the final text layout is clean and visually appealing, without duplicated or overlapping words.`;
-    
+    taskInstruction = `COVER SCENE: Extract book title and author. Create simple cover animation. Keep all descriptions brief and focused.`;
   } else if (sceneId === 'end') {
-    taskInstruction = `This is the final scene. Generate a concluding animation prompt that creates a gentle, summary scene evoking a feeling of happy resolution.`;
-    
+    taskInstruction = `FINAL SCENE: Create simple concluding animation. Keep all descriptions brief and focused.`;
   } else {
-    taskInstruction = `Analyze the attached illustration and its corresponding text for Page ${sceneId}. Generate a detailed animation prompt focusing on the visual elements and creating engaging motion.`;
+    taskInstruction = `PAGE ${sceneId}: Create simple animation prompt. Keep all descriptions brief and focused.`;
   }
   
   if (feedback) {
-    taskInstruction += `\n\nREGENERATION FEEDBACK: The previous attempt was not quite right. Please regenerate the JSON, taking this user feedback into account: "${feedback}"`;
+    taskInstruction += ` FEEDBACK: ${feedback}`;
   }
   
-  return `
-    ${systemInstruction}
-    ---
-    ${establishedContext}
-    ---
-    FULL STORY NARRATIVE:
-    ${project.storyText}
-    ---
-    CURRENT SCENE ANALYSIS TASK:
-    - Scene ID: ${sceneId}
-    - Scene Text: "${sceneText}"
-    - Task: ${taskInstruction}
-    Now, populate the JSON schema based on all the rules and context provided.
-  `;
+  return `${systemInstruction}
+
+STORY: ${project.storyText}
+
+SCENE ${sceneId}: "${sceneText}"
+
+TASK: ${taskInstruction}
+
+LENGTH REQUIREMENTS:
+- scene_summary: 1-2 sentences maximum
+- animation_style: 1 sentence maximum  
+- animation_tone: 1 sentence maximum
+- primary_action: 1-2 sentences maximum
+- subtle_motions: 1 sentence maximum`;
 };
 
 // Determine Seedance aspect ratio based on image dimensions
@@ -280,11 +228,12 @@ export const pollSeedanceTask = async (predictionId, setError) => {
   }
 };
 
+// Enhanced video generation using GPT-5 
 export const generateVideoWithSeedance = async (project, sceneId, imageBase64, feedback, setError, setLoadingMessage, options = {}) => {
   const { imageDimensions = null } = options;
   
-  // Generate prompt with OpenAI
-  setLoadingMessage('Creating animation...');
+  // Generate prompt with GPT-5 for superior analysis
+  setLoadingMessage('Creating enhanced animation...');
   const seedancePrompt = await generateSeedancePrompt(project, sceneId, imageBase64, feedback, setError);
   
   // Determine aspect ratio based on image dimensions
@@ -294,14 +243,14 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   
   const aspectRatio = getSeedanceAspectRatio(imageDimensions.width, imageDimensions.height);
   console.log(`Image dimensions: ${imageDimensions.width}x${imageDimensions.height}, using aspect ratio: ${aspectRatio}`);
-  console.log(`Generated Seedance prompt: "${seedancePrompt}"`);
+  console.log(`GPT-5 Enhanced Seedance prompt: "${seedancePrompt}"`);
   
   // Create Seedance task
-  setLoadingMessage('Starting video generation...');
+  setLoadingMessage('Starting enhanced video generation...');
   const predictionId = await createSeedanceTask(imageBase64, seedancePrompt, imageDimensions, setError);
   
   // Wait 10 seconds before starting to poll
-  setLoadingMessage('Processing video...');
+  setLoadingMessage('Processing enhanced video...');
   await new Promise(resolve => setTimeout(resolve, 10000));
   
   // Poll for completion
@@ -317,7 +266,7 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
         prompt: seedancePrompt,
         video_url: prediction.output,
         prediction_id: predictionId,
-        model: 'seedance',
+        model: 'seedance-gpt5',
         aspect_ratio: aspectRatio,
         resolution: '1080p'
       };
@@ -342,7 +291,7 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
       currentProgress = Math.min(95, 79 + ((attempts - 45) * 0.5)); // 79% -> 95% (very slow finish)
     }
     
-    setLoadingMessage(`Generating video... ${Math.round(currentProgress)}%`);
+    setLoadingMessage(`Generating enhanced video... ${Math.round(currentProgress)}%`);
     
     // Wait 10 seconds before next poll
     await new Promise(resolve => setTimeout(resolve, 10000));
@@ -350,29 +299,28 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   }
   
   // If we get here, polling timed out
-  throw new Error('Seedance generation timed out after 10 minutes');
+  throw new Error('Enhanced Seedance generation timed out after 10 minutes');
 };
 
-// Generate Seedance video prompt using OpenAI
+// Enhanced Seedance prompt generation using GPT-5's superior reasoning  
 export const generateSeedancePrompt = async (project, sceneId, imageBase64, feedback, setError) => {
   const systemPrompt = buildSeedancePromptText(project, sceneId, feedback);
   
   const payload = {
-    model: "gpt-4o", // Will switch to GPT-5 when available
-    messages: [
+    model: "gpt-5",
+    input: [
       {
         role: "user",
         content: [
-          { type: "text", text: systemPrompt },
-          ...(imageBase64 ? [{ 
-            type: "image_url", 
-            image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
+          { type: "input_text", text: systemPrompt },
+          ...(imageBase64 ? [{
+            type: "input_image", 
+            image_url: `data:image/jpeg;base64,${imageBase64}`
           }] : [])
         ]
       }
     ],
-    max_tokens: 300,
-    temperature: 0.7
+    max_output_tokens: 800
   };
 
   try {
@@ -384,18 +332,24 @@ export const generateSeedancePrompt = async (project, sceneId, imageBase64, feed
 
     if (!response.ok) {
       const errorBody = await response.text();
-      throw new Error(`OpenAI API Error: ${response.status} ${response.statusText} - ${errorBody}`);
+      throw new Error(`OpenAI GPT-5 Seedance Prompt Error: ${response.status} ${response.statusText} - ${errorBody}`);
     }
 
     const result = await response.json();
+    console.log('Full GPT-5 Seedance Prompt Response:', JSON.stringify(result, null, 2));
     
-    if (result.choices && result.choices.length > 0 && result.choices[0].message.content) {
-      const promptText = result.choices[0].message.content.trim();
-      return promptText;
-    } else {
-      console.error("OpenAI Response was empty or invalid:", result);
-      throw new Error('OpenAI returned an empty or invalid response.');
+    if (result.output && result.output.length > 0) {
+      const messageOutput = result.output.find(output => output.type === 'message');
+      console.log('Seedance message output found:', messageOutput);
+      if (messageOutput && messageOutput.content && messageOutput.content[0] && messageOutput.content[0].text) {
+        const promptText = messageOutput.content[0].text.trim();
+        console.log('Seedance prompt text:', promptText);
+        return promptText;
+      }
     }
+    
+    console.error("GPT-5 Seedance Prompt Response was invalid:", result);
+    throw new Error('GPT-5 returned an invalid response for Seedance prompt generation.');
   } catch (err) {
     console.error("Error in generateSeedancePrompt:", err);
     setError(err.message);
@@ -403,29 +357,32 @@ export const generateSeedancePrompt = async (project, sceneId, imageBase64, feed
   }
 };
 
-export const generateScene = async (project, sceneId, imageBase64, feedback, setError) => {
-  const systemPrompt = buildApiPromptText(project, sceneId, feedback);
-  
+// Enhanced cover analysis using GPT-5's superior OCR capabilities
+export const analyzeCover = async (imageBase64, setError) => {
+  const systemPrompt = `Extract book title and author from this cover image.`;
+
   const payload = {
-    model: "gpt-4o-2024-08-06", // Use the specific model that supports Structured Outputs
-    messages: [
+    model: "gpt-5",
+    input: [
       {
         role: "user",
         content: [
-          { type: "text", text: systemPrompt },
-          ...(imageBase64 ? [{ 
-            type: "image_url", 
-            image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
-          }] : [])
+          { type: "input_text", text: systemPrompt },
+          {
+            type: "input_image",
+            image_url: `data:image/jpeg;base64,${imageBase64}`
+          }
         ]
       }
     ],
-    response_format: {
-      type: "json_schema",
-      json_schema: animationPromptSchema
+    text: {
+      format: {
+        type: "json_schema",
+        name: coverAnalysisSchema.name,
+        schema: coverAnalysisSchema.schema
+      }
     },
-    max_tokens: 2000,
-    temperature: 0.7
+    max_output_tokens: 1000
   };
 
   try {
@@ -437,19 +394,85 @@ export const generateScene = async (project, sceneId, imageBase64, feedback, set
 
     if (!response.ok) {
       const errorBody = await response.text();
-      throw new Error(`OpenAI API Error: ${response.status} ${response.statusText} - ${errorBody}`);
+      throw new Error(`OpenAI GPT-5 Cover Analysis Error: ${response.status} ${response.statusText} - ${errorBody}`);
+    }
+
+    const result = await response.json();
+    console.log('Full GPT-5 Cover Analysis Response:', JSON.stringify(result, null, 2));
+    
+    if (result.output && result.output.length > 0) {
+      const messageOutput = result.output.find(output => output.type === 'message');
+      console.log('Message output found:', messageOutput);
+      if (messageOutput && messageOutput.content && messageOutput.content[0] && messageOutput.content[0].text) {
+        const coverData = JSON.parse(messageOutput.content[0].text);
+        console.log('GPT-5 Enhanced Cover Analysis:', coverData);
+        return coverData;
+      }
+    }
+    
+    console.error("GPT-5 Cover Analysis Response was invalid:", result);
+    throw new Error('GPT-5 returned an invalid response for cover analysis.');
+  } catch (err) {
+    console.error("Error in analyzeCover:", err);
+    setError(`Cover analysis failed: ${err.message}`);
+    throw err;
+  }
+};
+
+// Enhanced scene generation using GPT-5's superior reasoning
+export const generateScene = async (project, sceneId, imageBase64, feedback, setError) => {
+  const systemPrompt = buildApiPromptText(project, sceneId, feedback);
+  
+  const payload = {
+    model: "gpt-5",
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: systemPrompt },
+          ...(imageBase64 ? [{
+            type: "input_image",
+            image_url: `data:image/jpeg;base64,${imageBase64}`
+          }] : [])
+        ]
+      }
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: animationPromptSchema.name,
+        schema: animationPromptSchema.schema
+      }
+    },
+    max_output_tokens: 3000
+  };
+
+  try {
+    const response = await fetch('/api/openai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`OpenAI GPT-5 Scene Generation Error: ${response.status} ${response.statusText} - ${errorBody}`);
     }
 
     const result = await response.json();
     
-    if (result.choices && result.choices.length > 0 && result.choices[0].message.content) {
-      const parsedJson = JSON.parse(result.choices[0].message.content);
-      console.log('OpenAI Structured Output - Animation Prompt:', parsedJson);
-      return parsedJson;
-    } else {
-      console.error("OpenAI Response was empty or invalid:", result);
-      throw new Error('OpenAI returned an empty or invalid response.');
+    if (result.output && result.output.length > 0) {
+      const messageOutput = result.output.find(output => output.type === 'message');
+      
+      if (messageOutput && messageOutput.content && messageOutput.content[0] && messageOutput.content[0].text) {
+        const parsedJson = JSON.parse(messageOutput.content[0].text);
+        console.log('GPT-5 Enhanced Scene Generation:', parsedJson);
+        return parsedJson;
+      }
     }
+    
+    console.error("GPT-5 Scene Generation Response was invalid:", result);
+    throw new Error('GPT-5 returned an invalid response for scene generation.');
   } catch (err) {
     console.error("Error in generateScene:", err);
     setError(err.message);

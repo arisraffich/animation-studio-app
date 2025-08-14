@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Loader2, UploadCloud } from '../common/Icons';
 import { CoverInfoConfirmationModal } from '../common/CoverInfoModal';
-import { findStoryContent, generateScene } from '../../services/api';
+import { findStoryContent, generateScene, analyzeCover } from '../../services/api';
 
 export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setError }) => {
   const [isFileParsing, setIsFileParsing] = useState(false);
@@ -63,19 +63,25 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
         scenes[String(index + 1)] = { status: 'pending', text: page.text };
       });
       
+      // Enhanced cover analysis with GPT-5 OCR
+      setLoadingMessage('Analyzing cover for title and author...');
+      const coverAnalysis = await analyzeCover(coverImageBase64, setError);
+      
       const initialProjectState = { 
         ...project, 
         storyText, 
         totalPages, 
         scenes,
-        pageDimensions  // Add PDF page dimensions to project
+        pageDimensions,  // Add PDF page dimensions to project
+        bookTitle: coverAnalysis.title,
+        bookAuthor: coverAnalysis.author
       };
       
       setLoadingMessage('Generating opening scene...');
       const newPrompt = await generateScene(initialProjectState, 'cover', coverImageBase64, '', setError);
 
-      const aiGuessedTitle = newPrompt.extracted_title || file.name.replace(/\.pdf$/i, '') || 'Untitled Project';
-      const aiGuessedAuthor = newPrompt.extracted_author || 'Unknown Author';
+      const aiGuessedTitle = coverAnalysis.title || newPrompt.extracted_title || file.name.replace(/\.pdf$/i, '') || 'Untitled Project';
+      const aiGuessedAuthor = coverAnalysis.author || newPrompt.extracted_author || 'Unknown Author';
       
       setPendingCoverInfo({ initialProjectState, newPrompt, aiGuessedTitle, aiGuessedAuthor });
 

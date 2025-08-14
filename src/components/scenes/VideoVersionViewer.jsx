@@ -16,7 +16,9 @@ export const VideoVersionViewer = ({
   selectionMode = false,
   selectedVersions = new Set(),
   onToggleVersionSelection = null,
-  onBulkDelete = null
+  onBulkDelete = null,
+  onGenerate = null,
+  hasUploadedImage = false
 }) => {
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -180,10 +182,11 @@ export const VideoVersionViewer = ({
   
   // Render unified card system
   const renderCard = (card, index) => {
+    
     const aspectRatioClass = getAspectRatioClass(card);
     
     // Upload card states
-    if (card.isUploadCard) {
+    if (card.isUploadCard || (showUploadCard && card.id === 'upload')) {
       // Loading state
       if (isUploading) {
         // Extract progress percentage from loading message
@@ -220,37 +223,7 @@ export const VideoVersionViewer = ({
         );
       }
       
-      // Uploaded image state
-      if (uploadImageBase64) {
-        return (
-          <div 
-            key={card.id}
-            className={`bg-gray-900 border border-gray-700 rounded-xl overflow-hidden ${aspectRatioClass}`}
-          >
-            <div className="relative w-full h-full">
-              <img 
-                src={`data:image/jpeg;base64,${uploadImageBase64}`} 
-                alt="Ready for generation" 
-                className="w-full h-full object-cover" 
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent opacity-0 hover:opacity-100 transition-opacity duration-200">
-                <div className="absolute bottom-2 left-2">
-                  <span className="bg-black/50 backdrop-blur-sm px-2 py-1 rounded text-white text-xs">
-                    Ready
-                  </span>
-                </div>
-              </div>
-            </div>
-            
-            {/* Version badge */}
-            <div className="absolute top-2 left-2">
-              <span className="bg-blue-500 text-white px-2 py-1 text-xs font-medium rounded-full">
-                v{card.version}
-              </span>
-            </div>
-          </div>
-        );
-      }
+      // Remove early return - let it fall through to main button logic
       
       // Empty upload state (or regeneration with stored image)
       
@@ -305,15 +278,20 @@ export const VideoVersionViewer = ({
             style={{ minHeight: '120px' }}
           >
             <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
-              <div className="text-blue-400 mb-3">
-                <RefreshCw size={48} className="animate-spin-slow" />
-              </div>
-              <p className="font-medium text-blue-300 text-center leading-tight">
+              <p className="font-medium text-blue-300 text-center leading-tight mb-4">
                 Ready to regenerate
               </p>
-              <p className="text-blue-400/70 text-sm mt-1 text-center">
-                with existing image
-              </p>
+              
+              {/* Generate button inside the card */}
+              {onGenerate && (
+                <button
+                  onClick={onGenerate}
+                  disabled={isUploading}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-medium transition-colors duration-200"
+                >
+                  {isUploading ? uploadLoadingMessage : 'Generate Scene'}
+                </button>
+              )}
             </div>
             
             {/* Version badge */}
@@ -326,44 +304,81 @@ export const VideoVersionViewer = ({
         );
       }
       
-      // First time upload: Empty state
+      // Show image thumbnail if uploaded, otherwise empty state
+      const hasImage = uploadImageBase64 || hasUploadedImage;
+      
       return (
-        <div
-          key={card.id}
-          className={`
-            relative bg-gray-900 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-300 w-full
-            ${isDragOver 
-              ? 'border-blue-400 bg-blue-500/10 scale-105' 
-              : 'border-gray-600 hover:border-gray-500 animate-pulse-subtle'
-            }
-            ${aspectRatioClass}
-          `}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          onClick={() => handleClick(card)}
-          style={{ minHeight: '120px' }} // Thumbnail-sized minimum height
-        >
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
-            <div className={`transition-all duration-300 ${isDragOver ? 'scale-110 text-blue-400' : 'text-gray-400'}`}>
-              <UploadCloud size={48} className="mb-3" />
-            </div>
-            <p className={`font-medium transition-colors duration-300 ${
-              isDragOver ? 'text-blue-400' : 'text-gray-300'
-            }`}>
-              {isDragOver ? 'Drop to upload' : 'Drop image here'}
-            </p>
-            <p className="text-gray-500 text-sm mt-1">
-              or click to browse
-            </p>
+        <div key={card.id} className="space-y-4">
+          <div
+            className={`
+              relative bg-gray-900 rounded-xl cursor-pointer transition-all duration-300 w-full overflow-hidden
+              ${hasImage 
+                ? 'border-2 border-solid border-gray-600 hover:border-gray-500' 
+                : `border-2 border-dashed ${isDragOver 
+                    ? 'border-blue-400 bg-blue-500/10 scale-105' 
+                    : 'border-gray-600 hover:border-gray-500 animate-pulse-subtle'
+                  }`
+              }
+              ${aspectRatioClass}
+            `}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => !hasImage && handleClick(card)}
+            style={{ minHeight: '120px' }}
+          >
+            {hasImage ? (
+              // Show uploaded image thumbnail
+              <>
+                <img 
+                  src={`data:image/jpeg;base64,${uploadImageBase64}`}
+                  alt="Uploaded scene"
+                  className="w-full h-full object-cover"
+                />
+                {/* Version badge */}
+                <div className="absolute top-2 left-2">
+                  <span className="bg-blue-500 text-white px-2 py-1 text-xs font-medium rounded-full">
+                    v{card.version}
+                  </span>
+                </div>
+              </>
+            ) : (
+              // Show empty upload state
+              <>
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
+                  <div className={`transition-all duration-300 ${isDragOver ? 'scale-110 text-blue-400' : 'text-gray-400'}`}>
+                    <UploadCloud size={48} className="mb-3" />
+                  </div>
+                  <p className={`font-medium transition-colors duration-300 ${
+                    isDragOver ? 'text-blue-400' : 'text-gray-300'
+                  }`}>
+                    {isDragOver ? 'Drop to upload' : 'Drop image here'}
+                  </p>
+                  <p className="text-gray-500 text-sm mt-1">
+                    or click to browse
+                  </p>
+                </div>
+                
+                {/* Version badge */}
+                <div className="absolute top-2 left-2">
+                  <span className="bg-gray-700 text-gray-300 px-2 py-1 text-xs font-medium rounded-full">
+                    v{card.version}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
           
-          {/* Version badge */}
-          <div className="absolute top-2 left-2">
-            <span className="bg-gray-700 text-gray-300 px-2 py-1 text-xs font-medium rounded-full">
-              v{card.version}
-            </span>
-          </div>
+          {/* Generate button - only show when image is uploaded */}
+          {hasImage && onGenerate && (
+            <button
+              onClick={onGenerate}
+              disabled={isUploading}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200"
+            >
+              {isUploading ? uploadLoadingMessage : 'Generate Scene'}
+            </button>
+          )}
         </div>
       );
     }

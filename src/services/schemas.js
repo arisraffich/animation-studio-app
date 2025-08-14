@@ -29,90 +29,44 @@ export const storyContentSchema = {
   }
 };
 
+export const coverAnalysisSchema = {
+  name: "cover_analysis",
+  schema: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      author: { type: "string" },
+      confidence: {
+        type: "object",
+        properties: {
+          title: { type: "number" },
+          author: { type: "number" }
+        },
+        required: ["title", "author"],
+        additionalProperties: false
+      },
+      notes: { type: "string" }
+    },
+    required: ["title", "author", "confidence", "notes"],
+    additionalProperties: false
+  }
+};
+
 export const animationPromptSchema = {
-  name: "animation_prompt_generation",
+  name: "animation_prompt_generation", 
   schema: {
     type: "object",
     properties: {
       page_number: { type: "number" },
       scene_summary: { type: "string" },
-      animation_style: { 
-        type: "object", 
-        properties: { 
-          style: { type: "string" }, 
-          color_palette: { type: "string" }, 
-          tone: { type: "string" }
-        },
-        required: ["style", "color_palette", "tone"],
-        additionalProperties: false
-      },
-      scene: { 
-        type: "object", 
-        properties: { 
-          location: { type: "string" }, 
-          time_of_day: { type: "string" }, 
-          environment_details: { type: "string" }
-        },
-        required: ["location", "time_of_day", "environment_details"],
-        additionalProperties: false
-      },
-      characters: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            character_id: { 
-              type: "string", 
-              description: "A unique, simple, lowercase ID for the character (e.g., 'mikey', 'grandfather')." 
-            },
-            description: { 
-              type: "string", 
-              description: "A detailed visual description of the character's appearance and clothing." 
-            },
-            initial_expression: { 
-              type: "string", 
-              description: "The character's primary emotion or expression at the start of the scene." 
-            },
-            is_present_in_scene: { 
-              type: "boolean", 
-              description: "Set to true if the character is visually present in the illustration for this specific page, otherwise set to false." 
-            }
-          },
-          required: ["character_id", "description", "initial_expression", "is_present_in_scene"],
-          additionalProperties: false
-        }
-      },
-      camera: { 
-        type: "object", 
-        properties: { 
-          shot_type: { type: "string" }, 
-          movement: { type: "string" }
-        },
-        required: ["shot_type", "movement"],
-        additionalProperties: false
-      },
-      action: { 
-        type: "object", 
-        properties: { 
-          primary_action: { type: "string" }, 
-          subtle_motions: { type: "string" }
-        },
-        required: ["primary_action", "subtle_motions"],
-        additionalProperties: false
-      },
-      metadata: { 
-        type: "object", 
-        properties: { 
-          estimated_duration_seconds: { type: "number" }, 
-          notes: { type: "string" }
-        },
-        required: ["estimated_duration_seconds", "notes"],
-        additionalProperties: false
-      },
+      animation_style: { type: "string" },
+      animation_tone: { type: "string" },
+      primary_action: { type: "string" },
+      subtle_motions: { type: "string" },
       extracted_title: { type: "string" },
       extracted_author: { type: "string" }
     },
-    required: ["page_number", "scene_summary", "animation_style", "scene", "characters", "camera", "action", "metadata"],
+    required: ["page_number", "scene_summary", "animation_style", "animation_tone", "primary_action", "subtle_motions", "extracted_title", "extracted_author"],
     additionalProperties: false
   }
 };

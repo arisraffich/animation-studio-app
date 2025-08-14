@@ -471,7 +471,7 @@ export const ProgressiveVideoGrid = ({
           sceneId={sceneId} 
           sceneData={sceneData}
           project={project}
-          showUploadCard={isRegenerating || (!hasExistingVideos && !legacyVideo)}
+          showUploadCard={isRegenerating || !hasExistingVideos}
           onImageUpload={handleImageUpload}
           uploadImageBase64={uploadImageBase64}
           isUploading={isUploading}
@@ -481,10 +481,12 @@ export const ProgressiveVideoGrid = ({
           selectionMode={selectionMode}
           selectedVersions={selectedVersions}
           onToggleVersionSelection={toggleVersionSelection}
+          onGenerate={handleGenerate}
+          hasUploadedImage={!!uploadImageBase64}
         />
       </div>
 
-      {/* Scene Text and Generate Button when regenerating or first time */}
+      {/* Scene Text editing when regenerating or first time */}
       {(isRegenerating || (!hasExistingVideos && !legacyVideo)) && (
         <div className="space-y-4">
           <div>
@@ -500,24 +502,16 @@ export const ProgressiveVideoGrid = ({
             />
           </div>
 
-          <div className="flex items-center justify-between">
-            <button
-              onClick={handleGenerate}
-              disabled={isUploading || (!uploadImageBase64 && !(isRegenerating && hasStoredImage))}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-medium transition-colors"
-            >
-              {isUploading ? 'Generating...' : 'Generate Scene'}
-            </button>
-
-            {isRegenerating && (
+          {isRegenerating && (
+            <div className="flex justify-end">
               <button
                 onClick={onCancelRegeneration}
                 className="text-gray-400 hover:text-gray-300 text-sm underline transition-colors"
               >
                 Cancel
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
       </div>
