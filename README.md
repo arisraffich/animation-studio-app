@@ -1,73 +1,76 @@
-# Aura ✨
+# Aura - AI-Powered Animation Studio
 
-An AI-powered animation studio with perfect regeneration magic - turning children's books into beautiful videos.
+Transform static illustrations into animated videos with AI-powered scene generation.
 
-## 🚀 Quick Start
+## Features
 
-### Development (Local)
+- **PDF Processing**: Upload children's books and extract story content
+- **AI Scene Analysis**: OpenAI analyzes illustrations and generates animation prompts  
+- **Video Generation**: Replicate's Seedance model creates animated videos
+- **Project Management**: Firebase storage for projects and scene data
+- **Multiple Video Versions**: Generate and manage multiple versions per scene
+
+## Tech Stack
+
+- **Frontend**: React + Vite + Tailwind CSS
+- **Backend**: Node.js + Express
+- **AI Services**: 
+  - OpenAI GPT-4o (scene analysis & prompt generation)
+  - Replicate Seedance (video generation)
+- **Database**: Firebase Firestore
+- **Deployment**: Railway
+
+## Environment Variables
+
+Create a `.env` file with:
+
 ```bash
-# 1. Copy environment template
-cp .env.example .env.local
+# OpenAI API Configuration
+OPENAI_API_KEY=your_openai_api_key_here
 
-# 2. Add your Gemini API key to .env.local
-GEMINI_API_KEY=your_actual_api_key_here
+# Replicate API Configuration (for Seedance video generation)  
+REPLICATE_API_TOKEN=your_replicate_token_here
 
-# 3. Install and run
+# Server Configuration
+PORT=3001
+
+# Firebase Configuration (get from Firebase console)
+VITE_FIREBASE_API_KEY=your_firebase_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your_project_id
+VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+VITE_FIREBASE_APP_ID=your_app_id
+```
+
+## Installation
+
+```bash
 npm install
-npm run dev          # Frontend: http://localhost:3003
-npm run server       # Backend: http://localhost:8081 (separate terminal)
+npm run dev
 ```
 
-### Production (Railway/Any Platform)
+## Deployment
+
 ```bash
-npm run build        # Build React app
-npm run server       # Start production server
+npm run build
+npm start
 ```
 
-## 🌐 Deployment
+## API Endpoints
 
-### Railway Deployment
-1. **Set Environment Variable**: `GEMINI_API_KEY=your_api_key` in Railway dashboard
-2. **Push to GitHub**: `git push origin main`
-3. **Auto-Deploy**: Railway builds and deploys automatically
+- `/api/openai` - OpenAI proxy for scene analysis
+- `/api/seedance/create` - Create Seedance video generation task
+- `/api/seedance/status/:id` - Check video generation status
 
-### Universal Configuration
-- **Local Development**: Uses `.env.local` file (git-ignored)
-- **Production**: Uses platform environment variables
-- **Same Codebase**: No changes needed between environments
+## Usage
 
-## 📁 Project Structure
+1. Upload a PDF children's book
+2. Extract story pages
+3. Upload illustrations for each scene
+4. Generate animated videos using AI
+5. Manage and preview multiple video versions
 
-```
-src/
-├── components/
-│   ├── common/          # Reusable UI components
-│   ├── dashboard/       # Dashboard view
-│   ├── workspace/       # Project workspace
-│   └── scenes/         # Scene-specific components
-├── hooks/              # Custom React hooks
-├── services/           # API calls and business logic
-└── styles/            # CSS files
-```
+## License
 
-## ⚙️ Features
-
-- 📚 PDF upload and text extraction
-- 🎨 AI-powered scene generation using Google Gemini
-- 💾 Local storage for project persistence
-- 🎬 Animation prompt generation
-- 📱 Responsive design with Tailwind CSS
-
-## 🔧 Tech Stack
-
-- **Frontend**: React 18, Vite, Tailwind CSS
-- **Backend**: Express.js, Node.js
-- **AI**: Google Gemini API
-- **PDF**: PDF.js for text extraction
-- **Deployment**: Railway/Render/Heroku compatible
-
-## 🔒 Security
-
-- Environment variables secured with `.gitignore`
-- API keys never committed to repository
-- Production-ready configuration out of the box
+Private project - All rights reserved

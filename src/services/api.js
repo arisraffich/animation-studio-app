@@ -1,5 +1,6 @@
 import { storyContentSchema, animationPromptSchema } from './schemas';
 
+// Extract story content from PDF pages using OpenAI
 export const findStoryContent = async (allPagesText, setError) => {
   const promptText = `You are a literary assistant. Analyze the following pages from a children's book and extract the main story content.
 
@@ -15,7 +16,7 @@ RULES:
 - Preserve the exact text content`;
 
   const payload = {
-    model: "gpt-4o-2024-08-06", // Use the specific model that supports Structured Outputs
+    model: "gpt-4o-2024-08-06",
     messages: [
       {
         role: "user",
@@ -59,7 +60,7 @@ RULES:
   }
 };
 
-// Build prompt for Seedance direct video generation
+// Build Seedance video prompt text
 const buildSeedancePromptText = (project, sceneId, feedback) => {
   const sceneText = project.scenes[sceneId]?.text || '';
   
@@ -118,47 +119,35 @@ Now analyze the provided illustration and create a single video prompt that brin
 Your response should be ONLY the video prompt text - no explanations, no additional text, no JSON structure.`;
 };
 
+// Build structured animation prompt for OpenAI
 const buildApiPromptText = (project, sceneId, feedback) => {
   const systemInstruction = `You are a precise and detail-oriented animation director. Your primary goal is to create a structured JSON animation prompt from a children's book page.
   
 **CRITICAL RULES:**
-1.  **Character Presence is Gospel:** The illustration is the ONLY source of truth for determining WHICH CHARACTERS ARE VISUALLY PRESENT. For every known character in the story's glossary, you MUST include them in the 'characters' array and set 'is_present_in_scene' to 'true' or 'false' based ONLY on who you can see in the current illustration. Do not add characters who are not visible.
-2.  **Character Identity & Decomposition:** Decompose group descriptions (e.g., "a family") into individual character objects. If a new name appears in the text (e.g., "Poppy"), first determine if it is a nickname for an existing character from the glossary before creating a new one. Assign simple, consistent, lowercase character_ids (e.g., 'mike', 'dad', 'grandfather').
-3.  **Metadata, Not On-Screen Text:** The 'character_id' field is a metadata tag for tracking. It MUST NOT be rendered as visible text in the final video.
-4.  **Dynamic and Cinematic Animation:** Describe camera movements and character actions with dynamic, evocative, and cinematic language to create an engaging result.`;
+1.  **Focus on Visual Elements:** Analyze the illustration and describe the scene, characters, and environment concisely. 
+2.  **Characters Summary:** Use the 'characters_summary' field to briefly describe key characters visible in the scene without complex tracking.
+3.  **Dynamic and Cinematic Animation:** Describe camera movements and character actions with dynamic, evocative, and cinematic language to create an engaging result.
+4.  **Keep It Simple:** Focus on creating engaging animation prompts without unnecessary complexity.`;
   
   let taskInstruction = '';
   const sceneText = project.scenes[sceneId]?.text || '';
   
-  // Build context from previous scenes for consistency
+  // Simplified context - no complex character tracking
   let establishedContext = "### Established Story Context\n";
-  const characterGlossary = {};
   let establishedStyle = null;
 
   Object.values(project.scenes).forEach(scene => {
-    if (scene.status === 'completed' && scene.prompt && scene.prompt.characters) {
-      scene.prompt.characters.forEach(char => {
-        if (char.character_id && !characterGlossary[char.character_id]) {
-          characterGlossary[char.character_id] = char.description;
-        }
-      });
-      if (!establishedStyle && scene.prompt.animation_style) {
+    if (scene.status === 'completed' && scene.prompt && scene.prompt.animation_style) {
+      if (!establishedStyle) {
         establishedStyle = scene.prompt.animation_style;
       }
     }
   });
-
-  if (Object.keys(characterGlossary).length > 0) {
-    establishedContext += "\n**Character Glossary:**\n";
-    for (const [id, desc] of Object.entries(characterGlossary)) {
-      establishedContext += `- ${id}: ${desc}\n`;
-    }
-  } else {
-    establishedContext += "\nNo characters have been established yet.\n";
-  }
   
   if (establishedStyle) {
     establishedContext += `\n**Animation Style Guide:**\n- Style: ${establishedStyle.style}\n- Tone: ${establishedStyle.tone}\n- Palette: ${establishedStyle.color_palette}\n`;
+  } else {
+    establishedContext += "\nNo established animation style yet.\n";
   }
 
   if (sceneId === 'cover') {
@@ -169,10 +158,10 @@ const buildApiPromptText = (project, sceneId, feedback) => {
     4.  **Add Director's Note:** In the 'metadata.notes' field, add a note to ensure the final text layout is clean and visually appealing, without duplicated or overlapping words.`;
     
   } else if (sceneId === 'end') {
-    taskInstruction = `This is the final scene. Generate a concluding animation prompt. Use the Character Glossary to create a gentle, summary scene evoking a feeling of happy resolution.`;
+    taskInstruction = `This is the final scene. Generate a concluding animation prompt that creates a gentle, summary scene evoking a feeling of happy resolution.`;
     
   } else {
-    taskInstruction = `Analyze the attached illustration and its corresponding text for Page ${sceneId}. Generate a detailed animation prompt. Strictly follow all rules in the System Instruction, especially the 'Roll Call' for character presence based on the illustration.`;
+    taskInstruction = `Analyze the attached illustration and its corresponding text for Page ${sceneId}. Generate a detailed animation prompt focusing on the visual elements and creating engaging motion.`;
   }
   
   if (feedback) {
@@ -193,87 +182,6 @@ const buildApiPromptText = (project, sceneId, feedback) => {
     - Task: ${taskInstruction}
     Now, populate the JSON schema based on all the rules and context provided.
   `;
-};
-
-// Convert structured JSON to neutral Veo-3 prompt (text format)
-const convertToVeo3TextPrompt = (structuredData) => {
-  const { scene, characters, action } = structuredData;
-  
-  let prompt = 'A serene illustrated scene animates with figures in harmonious motion';
-  
-  // Add basic location if available
-  if (scene?.location) {
-    prompt += ` in ${scene.location}`;
-  }
-  
-  // Add present figures in neutral terms
-  const presentCharacters = characters?.filter(char => char.is_present_in_scene) || [];
-  if (presentCharacters.length > 0) {
-    prompt += ' with illustrated figures moving naturally';
-  }
-  
-  // Add basic motion if available
-  if (action?.subtle_motions && action.subtle_motions !== 'None') {
-    prompt += ', featuring subtle, gentle movement';
-  }
-  
-  prompt += '. Soft lighting, peaceful mood, pastel colors.';
-  
-  return prompt;
-};
-
-// Convert structured JSON to JSON-structured Veo-3 prompt
-const convertToVeo3JsonPrompt = (structuredData) => {
-  const { scene, characters, action } = structuredData;
-  const presentCharacters = characters?.filter(char => char.is_present_in_scene) || [];
-  
-  return {
-    shot: {
-      composition: "wide illustrated scene with natural elements",
-      lens: "soft focus",
-      camera_movement: "subtle pan"
-    },
-    subject: {
-      description: presentCharacters.length > 0 ? "illustrated figures interacting gently" : "illustrated elements",
-      action: action?.subtle_motions && action.subtle_motions !== 'None' ? "moving naturally with subtle motion" : "gentle movement"
-    },
-    scene: {
-      location: scene?.location || "peaceful setting",
-      environment: "soft lighting, serene atmosphere"
-    },
-    visual_details: {
-      tone: "whimsical and calm",
-      color_palette: "pastel colors"
-    },
-    negative_prompt: "no distortion, no harsh elements, no realism in figures"
-  };
-};
-
-// Generate negative prompt from structured data
-const generateNegativePrompt = (structuredData) => {
-  const baseNegative = 'text overlays, logos, modern objects, harsh lighting, camera shake, abrupt movements';
-  
-  // Add characters who are NOT present to negative prompt
-  const absentCharacters = structuredData.characters?.filter(char => !char.is_present_in_scene) || [];
-  if (absentCharacters.length > 0) {
-    const absentDescriptions = absentCharacters.map(char => char.character_id).join(', ');
-    return `${baseNegative}, ${absentDescriptions}`;
-  }
-  
-  return baseNegative;
-};
-
-// Determine Veo-3 resolution based on image dimensions
-const getVeo3Resolution = (width, height) => {
-  const aspectRatio = width / height;
-  
-  // For smaller/square images, use 720p
-  if (aspectRatio >= 0.8 && aspectRatio <= 1.25) {
-    return '720p';
-  }
-  
-  // For all other aspect ratios, use 1080p
-  return '1080p';
 };
 
 // Determine Seedance aspect ratio based on image dimensions
@@ -309,201 +217,6 @@ const getSeedanceAspectRatio = (width, height) => {
   
   // Fallback to landscape
   return '16:9';
-};
-
-// Veo-3 via Replicate API functions
-export const createVeo3Task = async (imageBase64, structuredData, resolution = '1080p', setError, options = {}) => {
-  const { useJsonPrompt = false } = options;
-  
-  let prompt, negativePrompt;
-  
-  if (useJsonPrompt) {
-    // Try JSON-structured prompt
-    const jsonPrompt = convertToVeo3JsonPrompt(structuredData);
-    prompt = JSON.stringify(jsonPrompt);
-    negativePrompt = jsonPrompt.negative_prompt || generateNegativePrompt(structuredData);
-  } else {
-    // Use text prompt with neutral language
-    prompt = convertToVeo3TextPrompt(structuredData);
-    negativePrompt = generateNegativePrompt(structuredData);
-  }
-  
-  const payload = {
-    model: 'google/veo-3',
-    input: {
-      prompt: prompt,
-      image: `data:image/jpeg;base64,${imageBase64}`,
-      resolution: resolution,
-      negative_prompt: negativePrompt
-    }
-  };
-
-  try {
-    const response = await fetch('/api/replicate/create', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`Veo-3 API Error: ${response.status} ${response.statusText} - ${errorBody}`);
-    }
-
-    const result = await response.json();
-    return result.id;
-  } catch (err) {
-    console.error('Error creating Veo-3 task:', err);
-    setError(`Failed to create video generation task: ${err.message}`);
-    throw err;
-  }
-};
-
-export const pollVeo3Task = async (predictionId, setError) => {
-  try {
-    const response = await fetch(`/api/replicate/status/${predictionId}`, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`Veo-3 Status Error: ${response.status} ${response.statusText} - ${errorBody}`);
-    }
-
-    const result = await response.json();
-    return result;
-  } catch (err) {
-    console.error('Error polling Veo-3 task:', err);
-    setError(`Failed to check video generation status: ${err.message}`);
-    throw err;
-  }
-};
-
-// Prompt sanitization function
-const sanitizePrompt = (prompt) => {
-  // Common words that might trigger sensitivity filters
-  const sensitiveWords = [
-    'violent', 'aggressive', 'attack', 'fight', 'battle', 'war', 'weapon', 'gun', 'knife', 'sword',
-    'blood', 'death', 'kill', 'murder', 'hurt', 'pain', 'suffer', 'cry', 'scream', 'angry',
-    'scary', 'terrifying', 'horror', 'nightmare', 'monster', 'demon', 'evil', 'dark', 'shadow',
-    'naked', 'nude', 'body', 'skin', 'flesh', 'romance', 'kiss', 'love', 'intimate', 'sexual'
-  ];
-  
-  let sanitized = prompt.toLowerCase();
-  
-  // Replace sensitive words with gentler alternatives
-  const replacements = {
-    'fight': 'play',
-    'battle': 'game',
-    'attack': 'approach',
-    'angry': 'focused',
-    'scary': 'mysterious',
-    'dark': 'shadowy',
-    'hurt': 'tired',
-    'cry': 'express emotion',
-    'scream': 'call out'
-  };
-  
-  // Apply replacements
-  Object.entries(replacements).forEach(([word, replacement]) => {
-    sanitized = sanitized.replace(new RegExp(word, 'gi'), replacement);
-  });
-  
-  // Remove any remaining sensitive words
-  sensitiveWords.forEach(word => {
-    sanitized = sanitized.replace(new RegExp(word, 'gi'), '');
-  });
-  
-  // Clean up extra spaces
-  sanitized = sanitized.replace(/\s+/g, ' ').trim();
-  
-  return sanitized;
-};
-
-// Sanitize text fields in structured data
-const sanitizeText = (text) => {
-  if (!text) return '';
-  return text.replace(/\b(fight|battle|attack|scary|dark|hurt|cry|scream|angry)\b/gi, (match) => {
-    const replacements = {
-      'fight': 'play',
-      'battle': 'game', 
-      'attack': 'approach',
-      'scary': 'mysterious',
-      'dark': 'shadowy',
-      'hurt': 'tired',
-      'cry': 'express emotion',
-      'scream': 'call out',
-      'angry': 'focused'
-    };
-    return replacements[match.toLowerCase()] || '';
-  });
-};
-
-export const generateVideoWithVeo3 = async (project, sceneId, imageBase64, feedback, setError, setLoadingMessage, options = {}) => {
-  const { useJsonPrompt = false, imageDimensions = null } = options;
-  
-  // Generate structured data from Gemini
-  setLoadingMessage('Generating animation data with Gemini...');
-  const structuredData = await generateScene(project, sceneId, imageBase64, feedback, setError);
-  
-  // Determine resolution based on image dimensions
-  let resolution = '1080p'; // default fallback
-  if (imageDimensions) {
-    resolution = getVeo3Resolution(imageDimensions.width, imageDimensions.height);
-    console.log(`Image dimensions: ${imageDimensions.width}x${imageDimensions.height}, using resolution: ${resolution}`);
-  }
-  
-  // Create Veo-3 task with the structured data
-  setLoadingMessage('Creating Veo-3 video generation task...');
-  const predictionId = await createVeo3Task(
-    imageBase64, 
-    structuredData,
-    resolution,
-    setError,
-    { useJsonPrompt }
-  );
-  
-  // Wait 10 seconds before starting to poll
-  setLoadingMessage('Processing video with Google Veo-3...');
-  await new Promise(resolve => setTimeout(resolve, 10000));
-  
-  // Poll for completion
-  setLoadingMessage('Checking Veo-3 generation progress...');
-  let attempts = 0;
-  const maxAttempts = 60; // 10 minutes max
-  
-  while (attempts < maxAttempts) {
-    const prediction = await pollVeo3Task(predictionId, setError);
-    
-    if (prediction.status === 'succeeded' && prediction.output) {
-      // Video is ready!
-      return {
-        ...structuredData,
-        video_url: prediction.output,
-        prediction_id: predictionId,
-        model: 'veo-3'
-      };
-    } else if (prediction.status === 'failed') {
-      const errorMessage = prediction.error || 'Unknown error';
-      throw new Error(`Veo-3 generation failed: ${errorMessage}`);
-    } else if (prediction.status === 'canceled') {
-      throw new Error('Veo-3 generation was canceled');
-    }
-    
-    // Update progress message
-    setLoadingMessage(`Generating video with Veo-3... (${Math.floor((attempts + 1) / maxAttempts * 100)}%)`);
-    
-    // Wait 10 seconds before next poll
-    await new Promise(resolve => setTimeout(resolve, 10000));
-    attempts++;
-  }
-  
-  // If we get here, polling timed out
-  throw new Error('Veo-3 generation timed out after 10 minutes');
 };
 
 // Seedance via Replicate API functions
@@ -639,7 +352,6 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   // If we get here, polling timed out
   throw new Error('Seedance generation timed out after 10 minutes');
 };
-
 
 // Generate Seedance video prompt using OpenAI
 export const generateSeedancePrompt = async (project, sceneId, imageBase64, feedback, setError) => {
