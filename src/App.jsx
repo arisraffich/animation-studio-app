@@ -17,7 +17,7 @@ function App() {
   const [librariesLoaded, setLibrariesLoaded] = useState(false);
   const [libraryError, setLibraryError] = useState('');
   const [projectToDelete, setProjectToDelete] = useState(null);
-  const [firebaseLoaded, setFirebaseLoaded] = useState(false);
+  // Removed unused firebaseLoaded state
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState('');
@@ -66,7 +66,7 @@ function App() {
         // Check if there are projects in localStorage to migrate
         const localProjects = JSON.parse(localStorage.getItem('projects') || '[]');
         if (localProjects.length > 0) {
-          console.log('Found local projects, migrating to Firebase...');
+          // Migrating local projects to Firebase
           await migrateLocalStorageToFirebase();
           localStorage.removeItem('projects'); // Clear localStorage after migration
         }
@@ -74,9 +74,9 @@ function App() {
         // Load all projects from Firebase
         const firebaseProjects = await getAllProjects();
         setProjects(firebaseProjects);
-        setFirebaseLoaded(true);
+        // Projects loaded successfully
         
-        console.log('Loaded', firebaseProjects.length, 'projects from Firebase');
+        // Successfully loaded projects from Firebase
       } catch (error) {
         console.error('Error loading projects:', error);
         setLibraryError('Failed to load projects. Please refresh the page.');

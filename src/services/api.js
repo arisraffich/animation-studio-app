@@ -206,7 +206,7 @@ const getSeedanceAspectRatio = (width, height) => {
 };
 
 // Seedance via Replicate API functions
-export const createSeedanceTask = async (imageBase64, seedancePrompt, imageDimensions, setError) => {
+export const createSeedanceTask = async (imageBase64, seedancePrompt, imageDimensions, setError, generationId = null) => {
   const aspectRatio = getSeedanceAspectRatio(imageDimensions.width, imageDimensions.height);
   
   const payload = {
@@ -218,7 +218,8 @@ export const createSeedanceTask = async (imageBase64, seedancePrompt, imageDimen
       duration: 5,          // 5 second videos
       fps: 24,
       camera_fixed: true    // Prevent unwanted camera movements
-    }
+    },
+    generationId: generationId  // OPTIMIZATION 3: Include generation ID for WebSocket progress
   };
 
   try {
@@ -244,9 +245,13 @@ export const createSeedanceTask = async (imageBase64, seedancePrompt, imageDimen
   }
 };
 
-export const pollSeedanceTask = async (predictionId, setError) => {
+export const pollSeedanceTask = async (predictionId, setError, generationId = null) => {
   try {
-    const response = await fetch(`/api/seedance/status/${predictionId}`, {
+    const url = generationId 
+      ? `/api/seedance/status/${predictionId}?generationId=${encodeURIComponent(generationId)}`
+      : `/api/seedance/status/${predictionId}`;
+      
+    const response = await fetch(url, {
       headers: {
         'Content-Type': 'application/json'
       }
@@ -268,7 +273,7 @@ export const pollSeedanceTask = async (predictionId, setError) => {
 
 // Enhanced video generation using GPT-5 
 export const generateVideoWithSeedance = async (project, sceneId, imageBase64, feedback, setError, setLoadingMessage, options = {}) => {
-  const { imageDimensions = null, textData = null } = options;
+  const { imageDimensions = null, textData = null, generationId = null, websocketCallback = null } = options;
   
   // Generate prompt with GPT-5 for superior analysis
   setLoadingMessage('Creating animation...');
@@ -283,9 +288,9 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   console.log(`Image dimensions: ${imageDimensions.width}x${imageDimensions.height}, using aspect ratio: ${aspectRatio}`);
   console.log(`GPT-5 Enhanced Seedance prompt: "${seedancePrompt}"`);
   
-  // Create Seedance task
+  // Create Seedance task with WebSocket support
   setLoadingMessage('Starting video generation...');
-  const predictionId = await createSeedanceTask(imageBase64, seedancePrompt, imageDimensions, setError);
+  const predictionId = await createSeedanceTask(imageBase64, seedancePrompt, imageDimensions, setError, generationId);
   
   // Wait 10 seconds before starting to poll
   setLoadingMessage('Processing video...');
@@ -296,7 +301,7 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   const maxAttempts = 60; // 10 minutes max
   
   while (attempts < maxAttempts) {
-    const prediction = await pollSeedanceTask(predictionId, setError);
+    const prediction = await pollSeedanceTask(predictionId, setError, generationId);
     
     if (prediction.status === 'succeeded' && prediction.output) {
       // Video is ready!
@@ -315,20 +320,24 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
       throw new Error('Seedance generation was canceled');
     }
     
-    // Map actual progress to visual progress (30% actual = 100% visual, 3x faster)
-    let actualProgress;
-    if (attempts < 3) {
-      actualProgress = 10 + (attempts * 5); // 10% -> 25% (faster start)
-    } else if (attempts < 8) {
-      actualProgress = 25 + ((attempts - 3) * 1); // 25% -> 30% (gradual finish)
-    } else {
-      actualProgress = Math.min(30, 30); // Cap at 30% actual
+    // OPTIMIZATION 3: Use WebSocket progress if available, fallback to simulated
+    if (!websocketCallback) {
+      // Fallback: Map actual progress to visual progress (30% actual = 100% visual, 3x faster)
+      let actualProgress;
+      if (attempts < 3) {
+        actualProgress = 10 + (attempts * 5); // 10% -> 25% (faster start)
+      } else if (attempts < 8) {
+        actualProgress = 25 + ((attempts - 3) * 1); // 25% -> 30% (gradual finish)
+      } else {
+        actualProgress = Math.min(30, 30); // Cap at 30% actual
+      }
+      
+      // Convert to visual percentage (30% actual = 100% visual)
+      const currentProgress = Math.min(100, (actualProgress / 30) * 100);
+      
+      setLoadingMessage(`Generating video... ${Math.round(currentProgress)}%`);
     }
-    
-    // Convert to visual percentage (30% actual = 100% visual)
-    const currentProgress = Math.min(100, (actualProgress / 30) * 100);
-    
-    setLoadingMessage(`Generating video... ${Math.round(currentProgress)}%`);
+    // WebSocket updates will be handled by the callback automatically
     
     // Wait 10 seconds before next poll
     await new Promise(resolve => setTimeout(resolve, 10000));

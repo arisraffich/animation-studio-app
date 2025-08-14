@@ -10,7 +10,11 @@ export const ProjectWorkspace = ({ project, updateProject, goToDashboard, librar
   useEffect(() => {
     if (project.storyText) {
       const navItems = ['cover', ...Array.from({ length: project.totalPages }, (_, i) => String(i + 1)), 'end'];
-      const firstPendingScene = navItems.find(id => !project.scenes[id] || project.scenes[id].status !== 'completed');
+      // Consider both 'completed' and 'in_progress' scenes as non-pending to activate next page
+      const firstPendingScene = navItems.find(id => {
+        const scene = project.scenes[id];
+        return !scene || (scene.status !== 'completed' && scene.status !== 'in_progress');
+      });
       setCurrentSceneId(firstPendingScene || 'end');
     } else {
       setCurrentSceneId('cover');

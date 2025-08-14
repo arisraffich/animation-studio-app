@@ -8,28 +8,34 @@ export const CompletedSceneViewer = ({ sceneId, project, updateProject, setCurre
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [copySuccess, setCopySuccess] = useState('');
 
-  const copyToClipboard = () => {
+  const copyToClipboard = async () => {
     if (!sceneData?.prompt) return;
     const jsonString = JSON.stringify(sceneData.prompt, null, 2);
     
-    const textArea = document.createElement('textarea');
-    textArea.value = jsonString;
-    textArea.style.position = 'fixed'; 
-    textArea.style.opacity = '0';
-
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-
     try {
-      document.execCommand('copy');
-      setCopySuccess('Copied!');
+      // Use modern Clipboard API if available
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(jsonString);
+        setCopySuccess('Copied!');
+      } else {
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = jsonString;
+        textArea.style.position = 'fixed'; 
+        textArea.style.opacity = '0';
+
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        setCopySuccess('Copied!');
+      }
     } catch (err) {
       setCopySuccess('Failed!');
-      console.error('Fallback: Oops, unable to copy', err);
+      console.error('Unable to copy to clipboard:', err);
     }
 
-    document.body.removeChild(textArea);
     setTimeout(() => setCopySuccess(''), 2000);
   };
   

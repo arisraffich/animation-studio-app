@@ -96,7 +96,11 @@ export const updateProject = async (projectId, updates) => {
 
 export const deleteProject = async (projectId) => {
   try {
-    // Simple deletion - just remove the Firestore document
+    // Delete Storage files first (don't wait for completion)
+    const { deleteProjectImages } = await import('./storageService');
+    deleteProjectImages(projectId); // Fire and forget - don't await
+    
+    // Delete Firestore document
     const docRef = doc(db, PROJECTS_COLLECTION, projectId);
     await deleteDoc(docRef);
     

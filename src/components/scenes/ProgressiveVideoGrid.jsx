@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { VideoVersionViewer } from './VideoVersionViewer';
 import { ConfirmationModal } from '../common/ConfirmationModal';
 import { generateScene, generateVideoWithSeedance } from '../../services/api';
+import { uploadImageFromBase64, deleteVersionImage } from '../../services/storageService';
+import { websocketService } from '../../services/websocketService';
 
 export const ProgressiveVideoGrid = ({ 
   sceneId, 
@@ -13,7 +15,10 @@ export const ProgressiveVideoGrid = ({
 }) => {
   const [uploadImageBase64, setUploadImageBase64] = useState('');
   const [imageDimensions, setImageDimensions] = useState(null);
+  const [uploadedImageData, setUploadedImageData] = useState(null); // Firebase Storage data
   const [isUploading, setIsUploading] = useState(false);
+  const [isUploadingToStorage, setIsUploadingToStorage] = useState(false);
+  const [generationId, setGenerationId] = useState(null); // WebSocket generation tracking
   const [loadingMessage, setLoadingMessage] = useState('Generating...');
   const [editableSceneText, setEditableSceneText] = useState(project.scenes[sceneId]?.text || '');
   
@@ -76,6 +81,34 @@ export const ProgressiveVideoGrid = ({
     const currentText = project.scenes[sceneId]?.text || '';
     setEditableSceneText(currentText);
   }, [project.scenes[sceneId]?.text, sceneId]);
+  
+  // OPTIMIZATION 3: Initialize WebSocket connection
+  useEffect(() => {
+    websocketService.connect().catch(error => {
+      console.log('WebSocket connection failed, will use fallback progress:', error);
+    });
+  }, []);
+  
+  // Cleanup WebSocket subscriptions when generationId changes
+  useEffect(() => {
+    return () => {
+      if (generationId) {
+        websocketService.unsubscribe(generationId);
+      }
+    };
+  }, [generationId]);
+  
+  // Clear local UI state when switching scenes
+  useEffect(() => {
+    // Clear local state when switching scenes to prevent cross-contamination
+    setIsUploading(false);
+    setLoadingMessage('');
+    setGenerationId(null);
+    setUploadImageBase64('');
+    setImageDimensions(null);
+    setUploadedImageData(null);
+    setIsUploadingToStorage(false);
+  }, [sceneId]);
 
   const sceneData = project.scenes[sceneId];
   const videoVersions = sceneData?.videoVersions || [];
@@ -89,17 +122,16 @@ export const ProgressiveVideoGrid = ({
   
   // Check if we have a stored image for this scene (for regeneration)
   const storedImageData = sceneData?.storedImage;
-  const hasStoredImage = storedImageData?.base64 && storedImageData?.dimensions;
+  const hasStoredImage = (storedImageData?.base64 || storedImageData?.url) && storedImageData?.dimensions;
   
-  // Initialize with stored image only when actually generating (not when just regenerating)
-  const [useStoredImageForGeneration, setUseStoredImageForGeneration] = useState(false);
+  // Removed unused useStoredImageForGeneration state
 
 
-  const handleImageUpload = (file) => {
+  const handleImageUpload = async (file) => {
     const reader = new FileReader();
-    reader.onloadend = () => {
+    reader.onloadend = async () => {
       const img = new Image();
-      img.onload = () => {
+      img.onload = async () => {
         // Store original dimensions before resizing
         const originalDimensions = {
           width: img.width,
@@ -131,7 +163,30 @@ export const ProgressiveVideoGrid = ({
         canvas.height = height;
         ctx.drawImage(img, 0, 0, width, height);
         
-        setUploadImageBase64(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
+        const base64String = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+        setUploadImageBase64(base64String);
+        
+        // OPTIMIZATION 1: Upload immediately to Firebase Storage
+        const currentScene = project.scenes[sceneId] || {};
+        if (!currentScene.storedImage) {
+          setIsUploadingToStorage(true);
+          try {
+            const existingVersions = currentScene.videoVersions || [];
+            const versionId = `v${existingVersions.length + 1}`;
+            const storageData = await uploadImageFromBase64(
+              project.id,
+              sceneId,
+              versionId,
+              base64String
+            );
+            setUploadedImageData(storageData);
+            console.log('OPTIMIZATION: Image uploaded immediately to Storage:', storageData.url);
+          } catch (error) {
+            console.error('Immediate upload failed:', error);
+            // Continue without failing - fallback to base64 during generation
+          }
+          setIsUploadingToStorage(false);
+        }
       };
       img.src = reader.result;
     };
@@ -139,22 +194,53 @@ export const ProgressiveVideoGrid = ({
   };
 
   const handleGenerate = async () => {
+    // Prevent double execution
+    if (isUploading) {
+      console.log('Generation already in progress, ignoring duplicate call');
+      return;
+    }
+
+    console.log('REGENERATION DEBUG:', {
+      isRegenerating,
+      uploadImageBase64: !!uploadImageBase64,
+      hasStoredImage,
+      storedImageData: storedImageData ? {
+        hasBase64: !!storedImageData.base64,
+        hasDimensions: !!storedImageData.dimensions,
+        hasUrl: !!storedImageData.url,
+        base64Length: storedImageData.base64?.length || 0
+      } : null,
+      calculatedHasStoredImage: storedImageData?.base64 && storedImageData?.dimensions
+    });
+
     // Determine which image to use for generation
     let imageToUse = uploadImageBase64;
     let dimensionsToUse = imageDimensions;
     
-    // If regenerating and no new image uploaded, use stored image
+    // If regenerating and no new image uploaded, use stored image  
     if (isRegenerating && !uploadImageBase64 && hasStoredImage) {
-      imageToUse = storedImageData.base64;
-      dimensionsToUse = storedImageData.dimensions;
-      
-      // Set the stored image for display during generation
-      setUploadImageBase64(storedImageData.base64);
-      setImageDimensions(storedImageData.dimensions);
-      setUseStoredImageForGeneration(true);
+      if (storedImageData.base64) {
+        // Use base64 data directly (preferred)
+        imageToUse = storedImageData.base64;
+        dimensionsToUse = storedImageData.dimensions;
+        
+        // Set for display
+        setUploadImageBase64(storedImageData.base64);
+        setImageDimensions(storedImageData.dimensions);
+        
+        console.log('Using stored base64 image:', imageToUse.length);
+      } else if (storedImageData.url) {
+        // Need to fetch from Firebase URL - but show loading first
+        imageToUse = 'FETCH_REQUIRED';
+        dimensionsToUse = storedImageData.dimensions;
+        console.log('Will fetch Firebase image after showing loading');
+      }
     }
 
+    console.log('Final imageToUse:', !!imageToUse);
+
     if (sceneId !== 'end' && !imageToUse) {
+      console.log('ERROR: No image available for generation');
       setError('Please upload an image first.');
       return;
     }
@@ -163,21 +249,101 @@ export const ProgressiveVideoGrid = ({
     setLoadingMessage('Starting generation... 15%');
     setError('');
     
-    // Start progress immediately with natural progression (3x faster)
-    let progressTimer;
-    let currentProgress = 15;
-    const updateProgress = () => {
-      currentProgress += Math.random() * 6 + 2; // Faster natural increase (3x speed)
-      if (currentProgress > 45) {
-        clearInterval(progressTimer); // Let API take over progress
+    // Handle Firebase URL fetch AFTER showing loading state (eliminates delay)
+    if (imageToUse === 'FETCH_REQUIRED') {
+      setLoadingMessage('Loading stored image...');
+      try {
+        const response = await fetch('/api/firebase-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: storedImageData.url })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Server fetch failed: ${response.status}`);
+        }
+        
+        const { base64 } = await response.json();
+        imageToUse = base64;
+        
+        // Set for display
+        setUploadImageBase64(base64);
+        setImageDimensions(storedImageData.dimensions);
+        
+        console.log('Fetched Firebase image:', base64.length);
+      } catch (error) {
+        console.error('Failed to fetch Firebase image:', error);
+        setError('Failed to load stored image for regeneration.');
+        setIsUploading(false);
         return;
       }
-      setLoadingMessage(`Starting generation... ${Math.round(currentProgress)}%`);
+    }
+    
+    // OPTIMIZATION 3: Create unique generation ID for WebSocket tracking
+    const currentGenerationId = `gen_${project.id}_${sceneId}_${Date.now()}`;
+    setGenerationId(currentGenerationId);
+    
+    // Track generation locally only
+    console.log('Starting generation with ID:', currentGenerationId);
+    
+    // OPTIMIZATION: Mark scene as in_progress to activate next page immediately
+    // REMOVED: This was causing Firebase updates that reset isRegenerating state
+    // const updatedScenesForProgress = {
+    //   ...project.scenes,
+    //   [sceneId]: {
+    //     ...project.scenes[sceneId],
+    //     status: 'in_progress',
+    //     text: editableSceneText
+    //   }
+    // };
+    // updateProject(project.id, { scenes: updatedScenesForProgress });
+    console.log('Scene will be marked as completed when generation finishes');
+    
+    // Setup WebSocket progress callback
+    const handleWebSocketProgress = (progressData) => {
+      console.log('WebSocket progress received:', progressData);
+      if (progressData.generationId === currentGenerationId || !progressData.generationId) {
+        console.log('WebSocket progress update applied:', progressData);
+        const message = progressData.message || 'Processing...';
+        const progress = progressData.progress || 0;
+        setLoadingMessage(`${message} ${progress}%`);
+        
+        // Local progress tracking only
+        console.log('WebSocket progress:', message, progress + '%');
+      }
     };
-    progressTimer = setInterval(updateProgress, 700); // Faster updates (3x speed)
+    
+    // Subscribe to WebSocket progress updates
+    websocketService.subscribe(currentGenerationId, handleWebSocketProgress);
+    
+    // OPTIMIZATION 3: Always show progress - WebSocket takes priority, fallback to simulated
+    let progressTimer = null;
+    let currentProgress = 15;
+    
+    const updateProgress = () => {
+      currentProgress += Math.random() * 6 + 2;
+      if (currentProgress > 45) {
+        clearInterval(progressTimer);
+        return;
+      }
+      const message = `Starting generation... ${Math.round(currentProgress)}%`;
+      setLoadingMessage(message);
+      
+      // Local fallback progress tracking only
+      console.log('Fallback progress:', message, Math.round(currentProgress) + '%');
+    };
+    
+    // Start fallback progress immediately (WebSocket will override if it works)
+    progressTimer = setInterval(updateProgress, 700);
+    console.log('Started fallback progress timer');
 
     try {
-      let newPrompt;
+      // OPTIMIZATION 1: Use immediate upload result if available
+      let finalUploadedImageData = uploadedImageData;
+      
+      // Get scene data early for use throughout the function
+      const existingScene = project.scenes[sceneId] || {};
+      const existingVersions = existingScene.videoVersions || [];
       
       // Calculate final text using comment system
       const textData = calculateFinalText();
@@ -194,35 +360,82 @@ export const ProgressiveVideoGrid = ({
         }
       };
       
-      // For pages 1,2,3... try video generation with Seedance, for cover/end use JSON only
-      if (sceneId !== 'cover' && sceneId !== 'end') {
-        try {
-          newPrompt = await generateVideoWithSeedance(
-            projectWithEditedText, 
-            sceneId, 
-            imageToUse, 
-            '', // No feedback
-            setError, 
-            setLoadingMessage, 
-            { imageDimensions: dimensionsToUse, textData }
-          );
-        } catch (error) {
-          // If video generation fails, fall back to JSON only
-          console.log('Seedance video generation failed, using JSON only:', error.message);
-          setError(`Video generation failed: ${error.message}. Generated prompt without video.`);
-          setLoadingMessage('Creating scene data...');
-          newPrompt = await generateScene(projectWithEditedText, sceneId, imageToUse, '', setError, textData);
-          // Mark that video generation failed
-          newPrompt.video_generation_failed = true;
-        }
-      } else {
-        newPrompt = await generateScene(projectWithEditedText, sceneId, imageToUse, '', setError, textData);
+      // OPTIMIZATION 2: Run prompt generation in parallel with any remaining upload
+      let uploadPromise = Promise.resolve(finalUploadedImageData);
+      let promptPromise;
+      
+      // Start both operations in parallel
+      setLoadingMessage('Processing in parallel...');
+      
+      // If we still need to upload, do it in parallel
+      if (imageToUse && !existingScene.storedImage && !uploadedImageData) {
+        uploadPromise = (async () => {
+          try {
+            const versionId = `v${existingVersions.length + 1}`;
+            const result = await uploadImageFromBase64(
+              project.id, 
+              sceneId, 
+              versionId, 
+              imageToUse
+            );
+            console.log('OPTIMIZATION: Parallel upload completed:', result.url);
+            return result;
+          } catch (error) {
+            console.error('Parallel upload failed:', error);
+            return null;
+          }
+        })();
       }
       
-      // Handle video versioning
-      const existingScene = project.scenes[sceneId] || {};
-      const existingVersions = existingScene.videoVersions || [];
+      // Start prompt generation immediately
+      if (sceneId !== 'cover' && sceneId !== 'end') {
+        promptPromise = (async () => {
+          try {
+            return await generateVideoWithSeedance(
+              projectWithEditedText, 
+              sceneId, 
+              imageToUse, 
+              '', // No feedback
+              setError, 
+              setLoadingMessage, 
+              { 
+                imageDimensions: dimensionsToUse, 
+                textData,
+                generationId: currentGenerationId,
+                websocketCallback: handleWebSocketProgress
+              }
+            );
+          } catch (error) {
+            // If video generation fails, fall back to JSON only
+            console.log('Seedance video generation failed, using JSON only:', error.message);
+            setError(`Video generation failed: ${error.message}. Generated prompt without video.`);
+            setLoadingMessage('Creating scene data...');
+            const fallbackPrompt = await generateScene(projectWithEditedText, sceneId, imageToUse, '', setError, textData);
+            fallbackPrompt.video_generation_failed = true;
+            return fallbackPrompt;
+          }
+        })();
+      } else {
+        promptPromise = generateScene(projectWithEditedText, sceneId, imageToUse, '', setError, textData);
+      }
       
+      // Wait for both operations to complete
+      const [parallelUploadResult, newPrompt] = await Promise.all([uploadPromise, promptPromise]);
+      
+      // Use the parallel upload result if it succeeded
+      if (parallelUploadResult && !finalUploadedImageData) {
+        finalUploadedImageData = parallelUploadResult;
+      }
+      
+      console.log('OPTIMIZATION: Both parallel operations completed');
+      
+      // Handle video versioning (variables already declared above)
+      
+      if (uploadedImageData) {
+        console.log('OPTIMIZATION: Using pre-uploaded image, skipping upload step');
+        setLoadingMessage('Starting generation with pre-uploaded image...');
+      }
+
       // Create new version entry with comment system support
       const newVersion = {
         id: Date.now(), // Simple timestamp ID
@@ -244,18 +457,26 @@ export const ProgressiveVideoGrid = ({
         ...project.scenes,
         [sceneId]: {
           ...existingScene,
-          status: 'completed',
+          status: 'completed', // CRITICAL: Ensure status is set to completed
           prompt: newPrompt, // Keep for backward compatibility
           text: editableSceneText,
           videoVersions: updatedVersions,
           // Store image data for future regenerations (first time only)
-          storedImage: existingScene.storedImage || (imageToUse ? {
+          storedImage: existingScene.storedImage || (finalUploadedImageData ? {
+            url: finalUploadedImageData.url,
+            path: finalUploadedImageData.path,
+            dimensions: dimensionsToUse,
+            uploadedAt: new Date().toISOString()
+          } : imageToUse ? {
+            // Fallback to base64 if Storage upload failed
             base64: imageToUse,
             dimensions: dimensionsToUse,
             uploadedAt: new Date().toISOString()
           } : null)
         }
       };
+      
+      console.log('CRITICAL: Updating scene', sceneId, 'to completed status');
       
       let projectUpdates = { scenes: updatedScenes };
       if (sceneId === 'cover' && newPrompt.extracted_title) {
@@ -270,11 +491,22 @@ export const ProgressiveVideoGrid = ({
       setImageDimensions(null);
       setSelectedComments(new Set());
       setNewCommentText('');
+      
+      // OPTIMIZATION 3: Clean up WebSocket subscription
+      websocketService.unsubscribe(currentGenerationId);
+      setGenerationId(null);
+      console.log('Generation completed:', currentGenerationId);
+      
       onCancelRegeneration(); // Close regeneration mode
 
     } catch (err) {
       setError(`Operation failed: ${err.message}.`);
       if (progressTimer) clearInterval(progressTimer);
+      
+      // Clean up WebSocket on error
+      websocketService.unsubscribe(currentGenerationId);
+      setGenerationId(null);
+      console.log('Generation failed:', currentGenerationId, err.message);
     } finally {
       setIsUploading(false);
       if (progressTimer) clearInterval(progressTimer);
@@ -286,6 +518,13 @@ export const ProgressiveVideoGrid = ({
     try {
       const existingScene = project.scenes[sceneId] || {};
       const existingVersions = existingScene.videoVersions || [];
+      
+      // Find the version being deleted to get version number for Storage cleanup
+      const versionToDelete = existingVersions.find(v => v.id === versionId);
+      if (versionToDelete) {
+        // Delete Storage file (fire and forget - don't await)
+        deleteVersionImage(project.id, sceneId, `v${versionToDelete.version}`);
+      }
       
       // Filter out the deleted version
       const remainingVersions = existingVersions.filter(v => v.id !== versionId);
@@ -392,12 +631,19 @@ export const ProgressiveVideoGrid = ({
       await new Promise(resolve => setTimeout(resolve, 500));
       
       setDeleteProgress('Removing video files...');
+      
+      // Delete Storage files for selected versions (fire and forget)
+      const existingScene = project.scenes[sceneId] || {};
+      const existingVersions = existingScene.videoVersions || [];
+      const versionsToDeleteFromStorage = existingVersions.filter(v => selectedVersions.has(v.id));
+      
+      versionsToDeleteFromStorage.forEach(version => {
+        deleteVersionImage(project.id, sceneId, `v${version.version}`);
+      });
+      
       await new Promise(resolve => setTimeout(resolve, 800));
       
       setDeleteProgress(`Deleting ${versionText}...`);
-      
-      const existingScene = project.scenes[sceneId] || {};
-      const existingVersions = existingScene.videoVersions || [];
       
       // Filter out deleted versions
       const remainingVersions = existingVersions.filter(v => !selectedVersions.has(v.id));
@@ -551,6 +797,7 @@ export const ProgressiveVideoGrid = ({
           onToggleVersionSelection={toggleVersionSelection}
           onGenerate={handleGenerate}
           hasUploadedImage={!!uploadImageBase64}
+          isUploadingToStorage={isUploadingToStorage}
         />
       </div>
 

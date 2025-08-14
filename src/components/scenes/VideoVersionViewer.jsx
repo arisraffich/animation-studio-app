@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Maximize, X, Loader2, UploadCloud, RefreshCw, Trash2 } from '../common/Icons';
+import { Play, X, Loader2, UploadCloud, Trash2 } from '../common/Icons';
 import { Checkbox } from '../common/Checkbox';
 
 export const VideoVersionViewer = ({ 
@@ -16,9 +16,10 @@ export const VideoVersionViewer = ({
   selectionMode = false,
   selectedVersions = new Set(),
   onToggleVersionSelection = null,
-  onBulkDelete = null,
+  // Removed unused onBulkDelete prop
   onGenerate = null,
-  hasUploadedImage = false
+  hasUploadedImage = false,
+  isUploadingToStorage = false,
 }) => {
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -30,8 +31,7 @@ export const VideoVersionViewer = ({
   
   // Check if we have stored image data for regeneration
   const storedImageData = sceneData?.storedImage;
-  // Don't show the regenerate UI - we want empty card when regenerating
-  const showRegenerateUI = false;
+  // Removed unused showRegenerateUI variable
   
   // Always use videoVersions if available, regardless of legacy video
   let allVersions = videoVersions;
@@ -57,6 +57,9 @@ export const VideoVersionViewer = ({
       version: allVersions.length + 1,
       isUploadCard: true
     });
+    console.log('ADDED UPLOAD CARD TO totalCards, length:', totalCards.length);
+  } else {
+    console.log('NOT ADDING UPLOAD CARD - showUploadCard=false');
   }
   
   // Upload handlers
@@ -188,13 +191,30 @@ export const VideoVersionViewer = ({
     
     const aspectRatioClass = getAspectRatioClass(card);
     
-    // Upload card states
+    // DEBUG: Log card rendering state
     if (card.isUploadCard || (showUploadCard && card.id === 'upload')) {
-      // Loading state
+      console.log('RENDERING UPLOAD CARD:', {
+        cardId: card.id,
+        isUploadCard: card.isUploadCard,
+        showUploadCard: showUploadCard,
+        isUploading: isUploading,
+        isRegenerating: isRegenerating,
+        uploadLoadingMessage: uploadLoadingMessage
+      });
+    }
+    
+    // Upload card states (includes regeneration cards)
+    if (card.isUploadCard || (showUploadCard && card.id === 'upload')) {
+      // ALWAYS show loading animation when uploading (regardless of regeneration state)
       if (isUploading) {
-        // Extract progress percentage from loading message
-        const progressMatch = uploadLoadingMessage.match(/(\d+)%/);
-        const progressPercentage = progressMatch ? parseInt(progressMatch[1]) : 0;
+        console.log('SHOWING LOADING ANIMATION - isUploading=true');
+        const displayMessage = uploadLoadingMessage;
+        // Extract progress percentage from message
+        let progressPercentage = 0;
+        const progressMatch = displayMessage.match(/(\d+)%/);
+        if (progressMatch) {
+          progressPercentage = parseInt(progressMatch[1]);
+        }
         
         return (
           <div 
@@ -211,7 +231,7 @@ export const VideoVersionViewer = ({
               )}
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm px-4">
                 <Loader2 className="animate-spin mb-2 text-blue-400" size={24} />
-                <p className="text-white font-medium text-sm text-center leading-tight">{uploadLoadingMessage}</p>
+                <p className="text-white font-medium text-sm text-center leading-tight">{displayMessage}</p>
               </div>
               
               {/* Progress line at bottom */}
@@ -226,49 +246,10 @@ export const VideoVersionViewer = ({
         );
       }
       
-      // Remove early return - let it fall through to main button logic
-      
-      // Empty upload state (or regeneration with stored image)
-      
-      if (showRegenerateUI) {
-        // Regeneration mode: Show stored image with transparent overlay
-        return (
-          <div
-            key={card.id}
-            className={`relative rounded-xl cursor-pointer transition-all duration-300 w-full overflow-hidden ${aspectRatioClass}`}
-            onClick={() => handleClick(card)}
-            style={{ minHeight: '120px' }}
-          >
-            {/* Background image */}
-            <img 
-              src={`data:image/jpeg;base64,${storedImageData.base64}`} 
-              alt="Scene image for regeneration" 
-              className="w-full h-full object-cover" 
-            />
-            
-            {/* Transparent black overlay with subtle pattern */}
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px]">
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
-                <div className="text-center">
-                  <p className="font-medium text-sm">Regenerate with</p>
-                  <p className="text-xs text-gray-300 mt-1">same image</p>
-                </div>
-              </div>
-            </div>
-            
-            {/* Version badge */}
-            <div className="absolute top-2 left-2">
-              <span className="bg-blue-500 text-white px-2 py-1 text-xs font-medium rounded-full">
-                v{card.version}
-              </span>
-            </div>
-          </div>
-        );
-      }
-      
-      // Regeneration vs First time upload: Different states
-      if (isRegenerating) {
-        // Regeneration ready state - no upload needed
+      // Regeneration button (when not uploading)
+      if (isRegenerating && !isUploading) {
+        console.log('SHOWING REGENERATE BUTTON - isRegenerating=true, isUploading=false');
+        // Regeneration ready state - show button before generation starts
         return (
           <div
             key={card.id}
@@ -283,11 +264,14 @@ export const VideoVersionViewer = ({
               {/* Generate button inside the card */}
               {onGenerate && (
                 <button
-                  onClick={onGenerate}
+                  onClick={() => {
+                    console.log('Regenerate button clicked, calling onGenerate');
+                    onGenerate();
+                  }}
                   disabled={isUploading}
                   className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-medium transition-colors duration-200"
                 >
-                  {isUploading ? uploadLoadingMessage : (isRegenerating ? 'Regenerate' : 'Generate')}
+                  Regenerate
                 </button>
               )}
             </div>
@@ -333,6 +317,15 @@ export const VideoVersionViewer = ({
                   alt="Uploaded scene"
                   className="w-full h-full object-cover"
                 />
+                {/* Upload to Storage progress overlay */}
+                {isUploadingToStorage && (
+                  <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center">
+                    <div className="text-center text-white">
+                      <Loader2 className="animate-spin mb-2 mx-auto" size={20} />
+                      <p className="text-xs">Uploading...</p>
+                    </div>
+                  </div>
+                )}
                 {/* Version badge */}
                 <div className="absolute top-2 left-2">
                   <span className="bg-blue-500 text-white px-2 py-1 text-xs font-medium rounded-full">
@@ -367,8 +360,8 @@ export const VideoVersionViewer = ({
             )}
           </div>
           
-          {/* Generate button - only show when image is uploaded */}
-          {hasImage && onGenerate && (
+          {/* Generate button - only show when image is uploaded AND not regenerating */}
+          {hasImage && onGenerate && !isRegenerating && (
             <button
               onClick={onGenerate}
               disabled={isUploading}
@@ -382,10 +375,15 @@ export const VideoVersionViewer = ({
     }
     
     // Completed video card
-    // Use stored image as immediate thumbnail if available
-    const thumbnailSrc = storedImageData?.base64 
-      ? `data:image/jpeg;base64,${storedImageData.base64}` 
-      : card.prompt?.cover_url || '';
+    // Use stored image as immediate thumbnail if available (Firebase Storage URL or base64)
+    let thumbnailSrc = card.prompt?.cover_url || '';
+    if (storedImageData?.url) {
+      // Use Firebase Storage URL if available
+      thumbnailSrc = storedImageData.url;
+    } else if (storedImageData?.base64) {
+      // Fallback to base64 for backward compatibility
+      thumbnailSrc = `data:image/jpeg;base64,${storedImageData.base64}`;
+    }
     
     // Debug: Check if this card is selected
     const isSelected = selectedVersions.has(card.id);
@@ -535,9 +533,11 @@ export const VideoVersionViewer = ({
                 className="w-full h-auto max-h-[70vh] bg-black"
                 controls
                 autoPlay
-                poster={storedImageData?.base64 
-                  ? `data:image/jpeg;base64,${storedImageData.base64}` 
-                  : selectedVideo.prompt?.cover_url || ''}
+                poster={storedImageData?.url 
+                  ? storedImageData.url
+                  : storedImageData?.base64 
+                    ? `data:image/jpeg;base64,${storedImageData.base64}` 
+                    : selectedVideo.prompt?.cover_url || ''}
               >
                 <source src={selectedVideo.prompt.video_url} type="video/mp4" />
                 Your browser does not support the video tag.

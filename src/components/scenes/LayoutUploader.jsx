@@ -26,32 +26,73 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
         if (!window.pdfjsLib) throw new Error("PDF parsing library not loaded.");
         const fileBuffer = await file.arrayBuffer();
         const pdf = await window.pdfjsLib.getDocument(fileBuffer).promise;
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const textContent = await page.getTextContent();
-          allPagesText.push({ pageNum: i, text: textContent.items.map(item => item.str).join(' ') });
-        }
-        setLoadingMessage('Extracting cover image...');
-        const coverPage = await pdf.getPage(1);
-        const viewport = coverPage.getViewport({ scale: 1.0 });
-        const canvas = document.createElement('canvas');
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
-        await coverPage.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-        coverImageBase64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
         
-        // Store PDF page dimensions for consistent aspect ratios
-        pageDimensions = {
-          width: viewport.width,
-          height: viewport.height,
-          aspectRatio: viewport.width / viewport.height
-        };
+        // OPTIMIZATION: Extract text and cover image in parallel
+        setLoadingMessage('Processing PDF pages...');
+        const textExtractionPromise = (async () => {
+          // OPTIMIZATION: Extract text from multiple pages in parallel (chunks of 5)
+          const pages = [];
+          const chunkSize = 5; // Process 5 pages at a time to avoid overwhelming the browser
+          
+          for (let i = 1; i <= pdf.numPages; i += chunkSize) {
+            const chunkPromises = [];
+            const endIndex = Math.min(i + chunkSize - 1, pdf.numPages);
+            
+            for (let pageNum = i; pageNum <= endIndex; pageNum++) {
+              chunkPromises.push(
+                (async () => {
+                  const page = await pdf.getPage(pageNum);
+                  const textContent = await page.getTextContent();
+                  return { pageNum, text: textContent.items.map(item => item.str).join(' ') };
+                })()
+              );
+            }
+            
+            const chunkResults = await Promise.all(chunkPromises);
+            pages.push(...chunkResults);
+          }
+          
+          // Sort pages by page number to maintain order
+          return pages.sort((a, b) => a.pageNum - b.pageNum);
+        })();
+        
+        const coverExtractionPromise = (async () => {
+          const coverPage = await pdf.getPage(1);
+          const viewport = coverPage.getViewport({ scale: 1.0 });
+          const canvas = document.createElement('canvas');
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+          await coverPage.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+          return {
+            base64: canvas.toDataURL('image/jpeg', 0.7).split(',')[1],
+            dimensions: {
+              width: viewport.width,
+              height: viewport.height,
+              aspectRatio: viewport.width / viewport.height
+            }
+          };
+        })();
+        
+        // Wait for both operations to complete
+        const [extractedPages, coverData] = await Promise.all([textExtractionPromise, coverExtractionPromise]);
+        allPagesText.push(...extractedPages);
+        coverImageBase64 = coverData.base64;
+        pageDimensions = coverData.dimensions;
+        
+        console.log('OPTIMIZATION: PDF processing completed in parallel');
       } else {
         throw new Error("Unsupported file type. Please upload a PDF file.");
       }
       
-      setLoadingMessage('Analyzing story content...');
-      const storyContent = await findStoryContent(allPagesText, setError);
+      // OPTIMIZATION: Run story analysis and cover analysis in parallel
+      setLoadingMessage('Analyzing content with AI...');
+      const [storyContent, coverAnalysis] = await Promise.all([
+        findStoryContent(allPagesText, setError),
+        analyzeCover(coverImageBase64, setError)
+      ]);
+      
+      console.log('OPTIMIZATION: AI analysis completed in parallel');
+      
       if (!storyContent || storyContent.length === 0) {
         throw new Error("AI could not identify the main story pages in the document.");
       }
@@ -63,10 +104,6 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
         scenes[String(index + 1)] = { status: 'pending', text: page.text };
       });
       
-      // Enhanced cover analysis with GPT-5 OCR
-      setLoadingMessage('Analyzing cover for title and author...');
-      const coverAnalysis = await analyzeCover(coverImageBase64, setError);
-      
       const initialProjectState = { 
         ...project, 
         storyText, 
@@ -77,13 +114,12 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
         bookAuthor: coverAnalysis.author
       };
       
-      setLoadingMessage('Generating opening scene...');
-      const newPrompt = await generateScene(initialProjectState, 'cover', coverImageBase64, '', setError);
-
-      const aiGuessedTitle = coverAnalysis.title || newPrompt.extracted_title || file.name.replace(/\.pdf$/i, '') || 'Untitled Project';
-      const aiGuessedAuthor = coverAnalysis.author || newPrompt.extracted_author || 'Unknown Author';
+      // OPTIMIZATION: Skip cover scene generation until user confirms info (saves ~5 seconds)
+      const aiGuessedTitle = coverAnalysis.title || file.name.replace(/\.pdf$/i, '') || 'Untitled Project';
+      const aiGuessedAuthor = coverAnalysis.author || 'Unknown Author';
       
-      setPendingCoverInfo({ initialProjectState, newPrompt, aiGuessedTitle, aiGuessedAuthor });
+      console.log('OPTIMIZATION: Skipping cover generation for faster initial load');
+      setPendingCoverInfo({ initialProjectState, coverImageBase64, aiGuessedTitle, aiGuessedAuthor });
 
     } catch (err) {
       setError(err.message);
@@ -91,29 +127,69 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
     }
   };
 
-  const handleConfirmCoverInfo = ({ confirmedTitle, confirmedAuthor }) => {
-    const { initialProjectState, newPrompt } = pendingCoverInfo;
+  const handleConfirmCoverInfo = async ({ confirmedTitle, confirmedAuthor }) => {
+    const { initialProjectState, coverImageBase64 } = pendingCoverInfo;
+    const originalPendingInfo = pendingCoverInfo; // Save for error recovery
 
-    newPrompt.extracted_title = confirmedTitle;
-    newPrompt.extracted_author = confirmedAuthor;
+    try {
+      // OPTIMIZATION: Generate cover scene only when user confirms (lazy loading)
+      // Keep loading state active and dismiss modal immediately for better UX
+      setPendingCoverInfo(null);
+      setIsFileParsing(true);
+      setLoadingMessage('Generating opening scene...');
+      
+      const projectWithConfirmedInfo = {
+        ...initialProjectState,
+        name: confirmedTitle,
+        author: confirmedAuthor
+      };
+      
+      console.log('Calling generateScene with:', { 
+        projectName: projectWithConfirmedInfo.name,
+        sceneId: 'cover',
+        hasImage: !!coverImageBase64,
+        imageLength: coverImageBase64?.length 
+      });
+      
+      // Create a local error handler to ensure proper context
+      const handleGenerationError = (errorMessage) => {
+        console.error('Generation error from API:', errorMessage);
+        setError(errorMessage);
+      };
+      
+      const newPrompt = await generateScene(projectWithConfirmedInfo, 'cover', coverImageBase64, '', handleGenerationError);
+      newPrompt.extracted_title = confirmedTitle;
+      newPrompt.extracted_author = confirmedAuthor;
 
-    const finalScenes = {
-      ...initialProjectState.scenes,
-      cover: { status: 'completed', prompt: newPrompt }
-    };
+      const finalScenes = {
+        ...initialProjectState.scenes,
+        cover: { status: 'completed', prompt: newPrompt }
+      };
 
-    const finalProjectState = {
-      ...initialProjectState,
-      scenes: finalScenes,
-      name: confirmedTitle,
-      author: confirmedAuthor,
-    };
-    
-    updateProject(project.id, finalProjectState);
-    setCurrentSceneId('cover');
-
-    setPendingCoverInfo(null);
-    setIsFileParsing(false);
+      const finalProjectState = {
+        ...initialProjectState,
+        scenes: finalScenes,
+        name: confirmedTitle,
+        author: confirmedAuthor,
+      };
+      
+      updateProject(project.id, finalProjectState);
+      setCurrentSceneId('cover');
+      setIsFileParsing(false);
+      
+      console.log('OPTIMIZATION: Cover scene generated after user confirmation');
+    } catch (err) {
+      console.error('Cover generation failed:', err);
+      console.error('Error details:', {
+        name: err.name,
+        message: err.message,
+        stack: err.stack
+      });
+      setError(`Cover generation failed: ${err.message}`);
+      setIsFileParsing(false);
+      // On error, show the confirmation modal again so user can retry
+      setPendingCoverInfo(originalPendingInfo);
+    }
   };
 
   return (

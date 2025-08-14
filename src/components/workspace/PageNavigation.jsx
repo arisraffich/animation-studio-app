@@ -4,7 +4,11 @@ import { Home } from '../common/Icons';
 export const PageNavigation = ({ project, currentSceneId, setCurrentSceneId, goToDashboard }) => {
   const navItems = project.totalPages > 0 ? ['cover', ...Array.from({ length: project.totalPages }, (_, i) => String(i + 1)), 'end'] : [];
   
-  const firstPendingSceneIndex = navItems.findIndex(id => !project.scenes[id] || project.scenes[id].status !== 'completed');
+  // Find first scene that hasn't been started (not completed or in_progress)
+  const firstPendingSceneIndex = navItems.findIndex(id => {
+    const scene = project.scenes[id];
+    return !scene || (scene.status !== 'completed' && scene.status !== 'in_progress');
+  });
 
   return (
     <nav className="w-full md:w-64 bg-gray-900/50 border-b md:border-b-0 md:border-r border-gray-800 p-4 flex flex-col">
@@ -14,11 +18,19 @@ export const PageNavigation = ({ project, currentSceneId, setCurrentSceneId, goT
         {navItems.map((id, index) => {
           const isCurrent = id === currentSceneId;
           const isDisabled = firstPendingSceneIndex !== -1 && index > firstPendingSceneIndex;
+          const sceneStatus = project.scenes[id]?.status;
 
           let label = '';
           if (id === 'cover') label = 'Cover';
           else if (id === 'end') label = 'End Scene';
           else label = `Page ${id}`;
+          
+          // Add status indicator
+          if (sceneStatus === 'in_progress') {
+            label += ' ⏳';
+          } else if (sceneStatus === 'completed') {
+            label += ' ✓';
+          }
 
           return (
             <li key={id}>
