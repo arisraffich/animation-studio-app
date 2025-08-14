@@ -75,52 +75,88 @@ Return story pages with clean narrative text (remove page numbers from beginning
   }
 };
 
-// Build Seedance video prompt text
-const buildSeedancePromptText = (project, sceneId, feedback) => {
-  const sceneText = project.scenes[sceneId]?.text || '';
+// Build Seedance video prompt text with comment system support
+const buildSeedancePromptText = (project, sceneId, feedback, textData = null) => {
+  // Extract text data from the scene or use provided textData
+  const sceneData = project.scenes[sceneId];
+  let sceneText = sceneData?.text || '';
+  let animationNotes = '';
+  
+  // If textData is provided (from comment system), use it
+  if (textData) {
+    sceneText = textData.originalText;
+    animationNotes = textData.animationNotes;
+  }
   
   let taskInstruction = '';
   if (sceneId === 'cover') {
-    taskInstruction = `This is the COVER SCENE. Focus on creating a cinematic title sequence that captures the essence of the book while maintaining the illustration's composition.`;
+    taskInstruction = `This is the COVER SCENE. Focus on creating a cinematic title sequence.`;
   } else if (sceneId === 'end') {
-    taskInstruction = `This is the final scene. Create a gentle, concluding animation that provides closure and evokes a feeling of happy resolution.`;
+    taskInstruction = `This is the final scene. Create a gentle, concluding animation.`;
   } else {
-    taskInstruction = `This is Page ${sceneId} of the story. Create a video prompt that brings this specific scene to life.`;
+    taskInstruction = `This is Page ${sceneId} of the story. Create a video prompt that brings this scene to life.`;
   }
   
   if (feedback) {
-    taskInstruction += `\n\nREGENERATION FEEDBACK: Please adjust based on this feedback: "${feedback}"`;
+    taskInstruction += ` FEEDBACK: ${feedback}`;
   }
 
-  return `Create a simple video prompt for this scene: "${sceneText}"
+  let prompt = `Create a simple video prompt for this content:
 
-Keep it to 1-2 sentences. Focus mainly on character movements (people and animals), with minimal environment details.`;
+Scene text: "${sceneText}"`;
+
+  if (animationNotes) {
+    prompt += `
+Animation notes: ${animationNotes}`;
+  }
+
+  prompt += `
+
+${taskInstruction} Keep it to 1-2 sentences. Focus mainly on character movements (people and animals), with minimal environment details.`;
+
+  return prompt;
 };
 
-// Build structured animation prompt for OpenAI
-const buildApiPromptText = (project, sceneId, feedback) => {
+// Build structured animation prompt for OpenAI with comment system support
+const buildApiPromptText = (project, sceneId, feedback, textData = null) => {
   const systemInstruction = `Create a concise animation prompt from this children's book page. Keep each field to 1-2 short sentences maximum. Focus on essential visual elements and simple motion.`;
   
-  let taskInstruction = '';
-  const sceneText = project.scenes[sceneId]?.text || '';
+  // Extract text data from the scene or use provided textData
+  const sceneData = project.scenes[sceneId];
+  let sceneText = sceneData?.text || '';
+  let animationNotes = '';
   
+  // If textData is provided (from comment system), use it
+  if (textData) {
+    sceneText = textData.originalText;
+    animationNotes = textData.animationNotes;
+  }
+  
+  let taskInstruction = '';
   if (sceneId === 'cover') {
-    taskInstruction = `COVER SCENE: Extract book title and author. Create simple cover animation. Keep all descriptions brief and focused.`;
+    taskInstruction = `COVER SCENE: Extract book title and author. Create simple cover animation.`;
   } else if (sceneId === 'end') {
-    taskInstruction = `FINAL SCENE: Create simple concluding animation. Keep all descriptions brief and focused.`;
+    taskInstruction = `FINAL SCENE: Create simple concluding animation.`;
   } else {
-    taskInstruction = `PAGE ${sceneId}: Create simple animation prompt. Keep all descriptions brief and focused.`;
+    taskInstruction = `PAGE ${sceneId}: Create simple animation prompt.`;
   }
   
   if (feedback) {
     taskInstruction += ` FEEDBACK: ${feedback}`;
   }
   
-  return `${systemInstruction}
+  let prompt = `${systemInstruction}
 
 STORY: ${project.storyText}
 
-SCENE ${sceneId}: "${sceneText}"
+Scene text: "${sceneText}"`;
+
+  if (animationNotes) {
+    prompt += `
+Animation notes: ${animationNotes}`;
+  }
+
+  prompt += `
 
 TASK: ${taskInstruction}
 
@@ -130,6 +166,8 @@ LENGTH REQUIREMENTS:
 - animation_tone: 1 sentence maximum
 - primary_action: 1-2 sentences maximum
 - subtle_motions: 1 sentence maximum`;
+
+  return prompt;
 };
 
 // Determine Seedance aspect ratio based on image dimensions
@@ -230,11 +268,11 @@ export const pollSeedanceTask = async (predictionId, setError) => {
 
 // Enhanced video generation using GPT-5 
 export const generateVideoWithSeedance = async (project, sceneId, imageBase64, feedback, setError, setLoadingMessage, options = {}) => {
-  const { imageDimensions = null } = options;
+  const { imageDimensions = null, textData = null } = options;
   
   // Generate prompt with GPT-5 for superior analysis
-  setLoadingMessage('Creating enhanced animation...');
-  const seedancePrompt = await generateSeedancePrompt(project, sceneId, imageBase64, feedback, setError);
+  setLoadingMessage('Creating animation...');
+  const seedancePrompt = await generateSeedancePrompt(project, sceneId, imageBase64, feedback, setError, textData);
   
   // Determine aspect ratio based on image dimensions
   if (!imageDimensions) {
@@ -246,11 +284,11 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   console.log(`GPT-5 Enhanced Seedance prompt: "${seedancePrompt}"`);
   
   // Create Seedance task
-  setLoadingMessage('Starting enhanced video generation...');
+  setLoadingMessage('Starting video generation...');
   const predictionId = await createSeedanceTask(imageBase64, seedancePrompt, imageDimensions, setError);
   
   // Wait 10 seconds before starting to poll
-  setLoadingMessage('Processing enhanced video...');
+  setLoadingMessage('Processing video...');
   await new Promise(resolve => setTimeout(resolve, 10000));
   
   // Poll for completion
@@ -277,21 +315,20 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
       throw new Error('Seedance generation was canceled');
     }
     
-    // More realistic progress calculation
-    let currentProgress;
-    if (attempts < 5) {
-      currentProgress = 10 + (attempts * 3); // 10% -> 22% (slower start)
-    } else if (attempts < 15) {
-      currentProgress = 22 + ((attempts - 5) * 2); // 22% -> 42% (gradual)
-    } else if (attempts < 30) {
-      currentProgress = 42 + ((attempts - 15) * 1.5); // 42% -> 64% (steady)
-    } else if (attempts < 45) {
-      currentProgress = 64 + ((attempts - 30) * 1); // 64% -> 79% (slower)
+    // Map actual progress to visual progress (30% actual = 100% visual, 3x faster)
+    let actualProgress;
+    if (attempts < 3) {
+      actualProgress = 10 + (attempts * 5); // 10% -> 25% (faster start)
+    } else if (attempts < 8) {
+      actualProgress = 25 + ((attempts - 3) * 1); // 25% -> 30% (gradual finish)
     } else {
-      currentProgress = Math.min(95, 79 + ((attempts - 45) * 0.5)); // 79% -> 95% (very slow finish)
+      actualProgress = Math.min(30, 30); // Cap at 30% actual
     }
     
-    setLoadingMessage(`Generating enhanced video... ${Math.round(currentProgress)}%`);
+    // Convert to visual percentage (30% actual = 100% visual)
+    const currentProgress = Math.min(100, (actualProgress / 30) * 100);
+    
+    setLoadingMessage(`Generating video... ${Math.round(currentProgress)}%`);
     
     // Wait 10 seconds before next poll
     await new Promise(resolve => setTimeout(resolve, 10000));
@@ -299,12 +336,12 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   }
   
   // If we get here, polling timed out
-  throw new Error('Enhanced Seedance generation timed out after 10 minutes');
+  throw new Error('Seedance generation timed out after 10 minutes');
 };
 
 // Enhanced Seedance prompt generation using GPT-5's superior reasoning  
-export const generateSeedancePrompt = async (project, sceneId, imageBase64, feedback, setError) => {
-  const systemPrompt = buildSeedancePromptText(project, sceneId, feedback);
+export const generateSeedancePrompt = async (project, sceneId, imageBase64, feedback, setError, textData = null) => {
+  const systemPrompt = buildSeedancePromptText(project, sceneId, feedback, textData);
   
   const payload = {
     model: "gpt-5",
@@ -341,10 +378,20 @@ export const generateSeedancePrompt = async (project, sceneId, imageBase64, feed
     if (result.output && result.output.length > 0) {
       const messageOutput = result.output.find(output => output.type === 'message');
       console.log('Seedance message output found:', messageOutput);
+      
       if (messageOutput && messageOutput.content && messageOutput.content[0] && messageOutput.content[0].text) {
         const promptText = messageOutput.content[0].text.trim();
         console.log('Seedance prompt text:', promptText);
         return promptText;
+      }
+      
+      // Fallback: check if there's any text output in different format
+      for (const output of result.output) {
+        if (output.content && output.content[0] && output.content[0].text) {
+          const promptText = output.content[0].text.trim();
+          console.log('Seedance prompt text (fallback):', promptText);
+          return promptText;
+        }
       }
     }
     
@@ -420,8 +467,8 @@ export const analyzeCover = async (imageBase64, setError) => {
 };
 
 // Enhanced scene generation using GPT-5's superior reasoning
-export const generateScene = async (project, sceneId, imageBase64, feedback, setError) => {
-  const systemPrompt = buildApiPromptText(project, sceneId, feedback);
+export const generateScene = async (project, sceneId, imageBase64, feedback, setError, textData = null) => {
+  const systemPrompt = buildApiPromptText(project, sceneId, feedback, textData);
   
   const payload = {
     model: "gpt-5",

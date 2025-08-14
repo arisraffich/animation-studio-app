@@ -17,6 +17,50 @@ export const ProgressiveVideoGrid = ({
   const [loadingMessage, setLoadingMessage] = useState('Generating...');
   const [editableSceneText, setEditableSceneText] = useState(project.scenes[sceneId]?.text || '');
   
+  // Comment system state
+  const [selectedComments, setSelectedComments] = useState(new Set());
+  const [newCommentText, setNewCommentText] = useState('');
+  
+  // Get available comments from previous versions
+  const getAvailableComments = () => {
+    const existingVersions = sceneData?.videoVersions || [];
+    const comments = [];
+    
+    existingVersions.forEach(version => {
+      if (version.commentText && version.commentText.trim()) {
+        comments.push({
+          id: version.id,
+          text: version.commentText,
+          version: version.version,
+          createdAt: version.createdAt
+        });
+      }
+    });
+    
+    return comments;
+  };
+  
+  // Calculate final text for generation
+  const calculateFinalText = () => {
+    const originalText = sceneData?.videoVersions?.[0]?.originalText || editableSceneText;
+    const comments = getAvailableComments();
+    const selectedCommentTexts = comments
+      .filter(comment => selectedComments.has(comment.id))
+      .map(comment => comment.text);
+    
+    if (newCommentText.trim()) {
+      selectedCommentTexts.push(newCommentText.trim());
+    }
+    
+    return {
+      originalText,
+      animationNotes: selectedCommentTexts.join('. '),
+      finalText: selectedCommentTexts.length > 0 
+        ? `${originalText}. ${selectedCommentTexts.join('. ')}`
+        : originalText
+    };
+  };
+  
   // Bulk selection state
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedVersions, setSelectedVersions] = useState(new Set());
@@ -116,20 +160,36 @@ export const ProgressiveVideoGrid = ({
     }
 
     setIsUploading(true);
-    setLoadingMessage('Preparing...');
+    setLoadingMessage('Starting generation... 15%');
     setError('');
+    
+    // Start progress immediately with natural progression (3x faster)
+    let progressTimer;
+    let currentProgress = 15;
+    const updateProgress = () => {
+      currentProgress += Math.random() * 6 + 2; // Faster natural increase (3x speed)
+      if (currentProgress > 45) {
+        clearInterval(progressTimer); // Let API take over progress
+        return;
+      }
+      setLoadingMessage(`Starting generation... ${Math.round(currentProgress)}%`);
+    };
+    progressTimer = setInterval(updateProgress, 700); // Faster updates (3x speed)
 
     try {
       let newPrompt;
       
-      // Create modified project with edited scene text
+      // Calculate final text using comment system
+      const textData = calculateFinalText();
+      
+      // Create modified project with final combined text
       const projectWithEditedText = {
         ...project,
         scenes: {
           ...project.scenes,
           [sceneId]: {
             ...project.scenes[sceneId],
-            text: editableSceneText
+            text: textData.finalText
           }
         }
       };
@@ -144,32 +204,36 @@ export const ProgressiveVideoGrid = ({
             '', // No feedback
             setError, 
             setLoadingMessage, 
-            { imageDimensions: dimensionsToUse }
+            { imageDimensions: dimensionsToUse, textData }
           );
         } catch (error) {
           // If video generation fails, fall back to JSON only
           console.log('Seedance video generation failed, using JSON only:', error.message);
           setError(`Video generation failed: ${error.message}. Generated prompt without video.`);
           setLoadingMessage('Creating scene data...');
-          newPrompt = await generateScene(projectWithEditedText, sceneId, imageToUse, '', setError);
+          newPrompt = await generateScene(projectWithEditedText, sceneId, imageToUse, '', setError, textData);
           // Mark that video generation failed
           newPrompt.video_generation_failed = true;
         }
       } else {
-        newPrompt = await generateScene(projectWithEditedText, sceneId, imageToUse, '', setError);
+        newPrompt = await generateScene(projectWithEditedText, sceneId, imageToUse, '', setError, textData);
       }
       
       // Handle video versioning
       const existingScene = project.scenes[sceneId] || {};
       const existingVersions = existingScene.videoVersions || [];
       
-      // Create new version entry
+      // Create new version entry with comment system support
       const newVersion = {
         id: Date.now(), // Simple timestamp ID
         version: existingVersions.length + 1,
         createdAt: new Date().toISOString(),
         prompt: newPrompt,
-        isLatest: true
+        isLatest: true,
+        // Comment system fields
+        originalText: existingVersions.length === 0 ? textData.originalText : existingVersions[0].originalText,
+        commentText: newCommentText.trim(), // Store the new comment for this version
+        finalText: textData.finalText
       };
       
       // Mark previous versions as not latest
@@ -201,15 +265,19 @@ export const ProgressiveVideoGrid = ({
 
       updateProject(project.id, projectUpdates);
       
-      // Reset upload state
+      // Reset upload state and comment system
       setUploadImageBase64('');
       setImageDimensions(null);
+      setSelectedComments(new Set());
+      setNewCommentText('');
       onCancelRegeneration(); // Close regeneration mode
 
     } catch (err) {
       setError(`Operation failed: ${err.message}.`);
+      if (progressTimer) clearInterval(progressTimer);
     } finally {
       setIsUploading(false);
+      if (progressTimer) clearInterval(progressTimer);
     }
   };
 
@@ -486,21 +554,99 @@ export const ProgressiveVideoGrid = ({
         />
       </div>
 
-      {/* Scene Text editing when regenerating or first time */}
+      {/* Comment System UI when regenerating or first time */}
       {(isRegenerating || (!hasExistingVideos && !legacyVideo)) && (
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="scene-text" className="block mb-3 font-medium text-gray-300">
-              Scene Text
-            </label>
-            <textarea
-              id="scene-text"
-              value={editableSceneText}
-              onChange={(e) => setEditableSceneText(e.target.value)}
-              placeholder="Enter the scene text for video generation..."
-              className="w-full h-24 p-4 bg-gray-900 border border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition text-gray-300 resize-none"
-            />
-          </div>
+        <div className="space-y-6">
+          {/* First time generation - Scene Text input */}
+          {!isRegenerating && (
+            <div>
+              <label htmlFor="scene-text" className="block mb-3 font-medium text-gray-300">
+                Scene Text
+              </label>
+              <textarea
+                id="scene-text"
+                value={editableSceneText}
+                onChange={(e) => setEditableSceneText(e.target.value)}
+                placeholder="Enter the scene text for video generation..."
+                className="w-full h-24 p-4 bg-gray-900 border border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition text-gray-300 resize-none"
+              />
+            </div>
+          )}
+
+          {/* Regeneration - Comment System */}
+          {isRegenerating && (
+            <div className="space-y-4">
+              {/* New Comment Input */}
+              <div>
+                <label htmlFor="new-comment" className="block mb-3 font-medium text-gray-300">
+                  New Animation Notes
+                </label>
+                <textarea
+                  id="new-comment"
+                  value={newCommentText}
+                  onChange={(e) => setNewCommentText(e.target.value)}
+                  placeholder="Add specific animation directions..."
+                  className="w-full h-20 p-4 bg-gray-900 border border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition text-gray-300 resize-none"
+                />
+              </div>
+
+              {/* Live Preview */}
+              <div>
+                <label className="block mb-3 font-medium text-gray-300">
+                  Generation Preview
+                </label>
+                <div className="p-4 bg-gray-800 rounded-xl border border-gray-600">
+                  <div className="text-sm text-gray-400 mb-2">Scene text:</div>
+                  <div className="text-gray-300 mb-3">"{calculateFinalText().originalText}"</div>
+                  
+                  {calculateFinalText().animationNotes && (
+                    <>
+                      <div className="text-sm text-gray-400 mb-2">Animation notes:</div>
+                      <div className="text-blue-300">{calculateFinalText().animationNotes}</div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Available Comments */}
+              {getAvailableComments().length > 0 && (
+                <div>
+                  <label className="block mb-3 font-medium text-gray-300">
+                    Previous Animation Notes
+                  </label>
+                  <div className="space-y-2">
+                    {getAvailableComments().map((comment) => (
+                      <label
+                        key={comment.id}
+                        className="flex items-start gap-3 p-3 bg-gray-800 rounded-lg hover:bg-gray-750 transition-colors cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedComments.has(comment.id)}
+                          onChange={(e) => {
+                            const newSelected = new Set(selectedComments);
+                            if (e.target.checked) {
+                              newSelected.add(comment.id);
+                            } else {
+                              newSelected.delete(comment.id);
+                            }
+                            setSelectedComments(newSelected);
+                          }}
+                          className="mt-1 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <div className="text-gray-300 text-sm">{comment.text}</div>
+                          <div className="text-gray-500 text-xs mt-1">
+                            From v{comment.version}
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {isRegenerating && (
             <div className="flex justify-end">

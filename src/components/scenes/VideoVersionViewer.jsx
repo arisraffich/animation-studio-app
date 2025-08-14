@@ -175,9 +175,12 @@ export const VideoVersionViewer = ({
   
   // Determine grid layout classes based on card count
   const getGridClasses = (count) => {
-    if (count === 1) return 'grid-cols-1 max-w-xs';        // max-w-xs = 320px (thumbnail size)
-    if (count === 2) return 'grid-cols-2 max-w-lg gap-4';  // max-w-lg = 512px for 2 cards
-    return 'grid-cols-3 max-w-2xl gap-4';                  // max-w-2xl = 672px for 3+ cards
+    if (count === 1) return 'grid-cols-1 max-w-xs';                    // max-w-xs = 320px (thumbnail size)
+    if (count === 2) return 'grid-cols-2 max-w-lg gap-3';              // max-w-lg = 512px for 2 cards
+    if (count <= 3) return 'grid-cols-3 max-w-2xl gap-3';              // max-w-2xl = 672px for 3 cards
+    if (count <= 4) return 'grid-cols-4 max-w-4xl gap-3';              // max-w-4xl = 896px for 4 cards
+    if (count <= 5) return 'grid-cols-5 max-w-5xl gap-2';              // max-w-5xl = 1024px for 5 cards
+    return 'grid-cols-6 max-w-6xl gap-2';                              // max-w-6xl = 1152px for 6+ cards
   };
   
   // Render unified card system
@@ -270,18 +273,13 @@ export const VideoVersionViewer = ({
           <div
             key={card.id}
             className={`
-              relative bg-gradient-to-br from-blue-900/20 to-blue-800/10 border-2 border-blue-500/30 rounded-xl cursor-pointer transition-all duration-300 w-full
+              relative bg-gradient-to-br from-blue-900/20 to-blue-800/10 border-2 border-blue-500/30 rounded-xl transition-all duration-300 w-full
               hover:border-blue-400/50 hover:from-blue-900/30 hover:to-blue-800/20
               ${aspectRatioClass}
             `}
-            onClick={() => handleClick(card)}
             style={{ minHeight: '120px' }}
           >
             <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
-              <p className="font-medium text-blue-300 text-center leading-tight mb-4">
-                Ready to regenerate
-              </p>
-              
               {/* Generate button inside the card */}
               {onGenerate && (
                 <button
@@ -289,7 +287,7 @@ export const VideoVersionViewer = ({
                   disabled={isUploading}
                   className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-medium transition-colors duration-200"
                 >
-                  {isUploading ? uploadLoadingMessage : 'Generate Scene'}
+                  {isUploading ? uploadLoadingMessage : (isRegenerating ? 'Regenerate' : 'Generate')}
                 </button>
               )}
             </div>
@@ -376,7 +374,7 @@ export const VideoVersionViewer = ({
               disabled={isUploading}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200"
             >
-              {isUploading ? uploadLoadingMessage : 'Generate Scene'}
+              {isUploading ? uploadLoadingMessage : (isRegenerating ? 'Regenerate' : 'Generate')}
             </button>
           )}
         </div>
