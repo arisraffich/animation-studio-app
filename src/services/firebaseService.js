@@ -10,14 +10,7 @@ import {
   orderBy,
   query 
 } from "firebase/firestore";
-import { 
-  ref, 
-  uploadBytes, 
-  getDownloadURL, 
-  deleteObject,
-  listAll
-} from "firebase/storage";
-import { db, storage } from './firebase';
+import { db } from './firebase';
 
 // Projects Collection Reference
 const PROJECTS_COLLECTION = 'projects';
@@ -54,11 +47,13 @@ export const getProject = async (projectId) => {
     const docSnap = await getDoc(docRef);
     
     if (docSnap.exists()) {
-      return {
+      const project = {
         id: docSnap.id,
         ...docSnap.data(),
         createdAt: docSnap.data().createdAt?.toDate?.() || new Date()
       };
+      console.log('Firebase: Retrieved project:', projectId);
+      return project;
     } else {
       throw new Error('Project not found');
     }
@@ -76,7 +71,7 @@ export const createProject = async (projectData) => {
       updatedAt: serverTimestamp()
     });
     
-    console.log('Firebase: Created project with ID:', docRef.id);
+    console.log('Firebase: Created project:', docRef.id);
     return docRef.id;
   } catch (error) {
     console.error('Error creating project:', error);
@@ -101,117 +96,15 @@ export const updateProject = async (projectId, updates) => {
 
 export const deleteProject = async (projectId) => {
   try {
-    // Get project data first to identify images to delete
-    const project = await getProject(projectId);
-    
-    // Delete all associated images from storage
-    const imagesToDelete = [];
-    
-    if (project.scenes) {
-      Object.values(project.scenes).forEach(scene => {
-        // Collect stored images
-        if (scene.storedImage) {
-          // Note: We store base64 in Firestore, not Storage paths
-          // So no Storage cleanup needed for storedImage
-        }
-        
-        // Could add cleanup for other image types if we add them later
-      });
-    }
-    
-    // DISABLED: Clean up any images in the project's storage folder
-    // This was causing CORS errors, disabling for safety
-    /*
-    try {
-      const projectFolderRef = ref(storage, `images/${projectId}`);
-      const listResult = await listAll(projectFolderRef);
-      const deletePromises = listResult.items.map(itemRef => deleteObject(itemRef));
-    */
-    // DISABLED: All Storage cleanup code commented out to prevent CORS errors
-    // await Promise.all(deletePromises);
-    // if (listResult.items.length > 0) {
-    //   console.log(`Firebase: Deleted ${listResult.items.length} images for project:`, projectId);
-    // }
-    // } catch (storageError) {
-    //   console.warn('Warning: Could not clean up storage images:', storageError);
-    // }
-    
-    // Delete project document from Firestore
+    // Simple deletion - just remove the Firestore document
     const docRef = doc(db, PROJECTS_COLLECTION, projectId);
     await deleteDoc(docRef);
     
     console.log('Firebase: Deleted project:', projectId);
+    return true;
   } catch (error) {
     console.error('Error deleting project:', error);
     throw error;
-  }
-};
-
-// ====================
-// IMAGE STORAGE OPERATIONS
-// ====================
-
-export const uploadImage = async (projectId, sceneId, imageFile, imageType = 'scene') => {
-  try {
-    // Create a reference to the image location
-    const fileName = `${imageType}-${sceneId}-${Date.now()}`;
-    const imageRef = ref(storage, `images/${projectId}/${fileName}`);
-    
-    // Upload the file
-    const snapshot = await uploadBytes(imageRef, imageFile);
-    
-    // Get the download URL
-    const downloadURL = await getDownloadURL(snapshot.ref);
-    
-    console.log('Firebase: Uploaded image:', fileName);
-    return {
-      url: downloadURL,
-      path: snapshot.ref.fullPath,
-      fileName
-    };
-  } catch (error) {
-    console.error('Error uploading image:', error);
-    throw error;
-  }
-};
-
-export const uploadBase64Image = async (projectId, sceneId, base64Data, imageType = 'scene') => {
-  try {
-    // Convert base64 to blob
-    const response = await fetch(`data:image/jpeg;base64,${base64Data}`);
-    const blob = await response.blob();
-    
-    // Create a reference to the image location
-    const fileName = `${imageType}-${sceneId}-${Date.now()}.jpg`;
-    const imageRef = ref(storage, `images/${projectId}/${fileName}`);
-    
-    // Upload the blob
-    const snapshot = await uploadBytes(imageRef, blob);
-    
-    // Get the download URL
-    const downloadURL = await getDownloadURL(snapshot.ref);
-    
-    console.log('Firebase: Uploaded base64 image:', fileName);
-    return {
-      url: downloadURL,
-      path: snapshot.ref.fullPath,
-      fileName,
-      base64Data // Keep original base64 for API calls
-    };
-  } catch (error) {
-    console.error('Error uploading base64 image:', error);
-    throw error;
-  }
-};
-
-export const deleteImage = async (imagePath) => {
-  try {
-    const imageRef = ref(storage, imagePath);
-    await deleteObject(imageRef);
-    console.log('Firebase: Deleted image:', imagePath);
-  } catch (error) {
-    console.error('Error deleting image:', error);
-    // Don't throw error for image deletion failures
   }
 };
 
@@ -252,7 +145,12 @@ export const migrateLocalStorageToFirebase = async () => {
       }
     }
     
-    console.log('Migration complete. Migrated', migratedProjects.length, 'projects');
+    if (migratedProjects.length > 0) {
+      // Clear localStorage after successful migration
+      localStorage.removeItem('projects');
+      console.log('Migration completed. Cleared localStorage.');
+    }
+    
     return migratedProjects;
   } catch (error) {
     console.error('Error during migration:', error);
