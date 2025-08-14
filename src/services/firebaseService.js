@@ -119,26 +119,22 @@ export const deleteProject = async (projectId) => {
       });
     }
     
-    // Clean up any images in the project's storage folder
+    // DISABLED: Clean up any images in the project's storage folder
+    // This was causing CORS errors, disabling for safety
+    /*
     try {
-      // Delete the entire project folder in storage
-      // Note: Firebase doesn't have a "delete folder" operation
-      // We'll delete individual files if we find them
       const projectFolderRef = ref(storage, `images/${projectId}`);
-      
       const listResult = await listAll(projectFolderRef);
-      
-      // Delete all files in the project folder
       const deletePromises = listResult.items.map(itemRef => deleteObject(itemRef));
-      await Promise.all(deletePromises);
-      
-      if (listResult.items.length > 0) {
-        console.log(`Firebase: Deleted ${listResult.items.length} images for project:`, projectId);
-      }
-    } catch (storageError) {
-      // Don't fail the entire deletion if storage cleanup fails
-      console.warn('Warning: Could not clean up storage images:', storageError);
-    }
+    */
+    // DISABLED: All Storage cleanup code commented out to prevent CORS errors
+    // await Promise.all(deletePromises);
+    // if (listResult.items.length > 0) {
+    //   console.log(`Firebase: Deleted ${listResult.items.length} images for project:`, projectId);
+    // }
+    // } catch (storageError) {
+    //   console.warn('Warning: Could not clean up storage images:', storageError);
+    // }
     
     // Delete project document from Firestore
     const docRef = doc(db, PROJECTS_COLLECTION, projectId);
