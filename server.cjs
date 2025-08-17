@@ -260,6 +260,7 @@ app.get('/api/seedance/status/:predictionId', async (req, res) => {
   }
 });
 
+
 // Firebase Storage image proxy to avoid CORS issues
 app.post('/api/firebase-image', async (req, res) => {
   try {

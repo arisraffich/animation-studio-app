@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, X, Loader2, UploadCloud, Trash2 } from '../common/Icons';
+import { Play, X, Loader2, UploadCloud, Trash2, Download } from '../common/Icons';
 import { Checkbox } from '../common/Checkbox';
 
 export const VideoVersionViewer = ({ 
@@ -25,6 +25,24 @@ export const VideoVersionViewer = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef(null);
+  
+  // Download video function
+  const handleDownloadVideo = async (videoUrl, sceneId, version) => {
+    try {
+      const response = await fetch(videoUrl);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `scene_${sceneId}_v${version}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download failed:', error);
+    }
+  };
   
   // Get video versions from the scene data
   const videoVersions = sceneData?.videoVersions || [];
@@ -57,9 +75,7 @@ export const VideoVersionViewer = ({
       version: allVersions.length + 1,
       isUploadCard: true
     });
-    console.log('ADDED UPLOAD CARD TO totalCards, length:', totalCards.length);
   } else {
-    console.log('NOT ADDING UPLOAD CARD - showUploadCard=false');
   }
   
   // Upload handlers
@@ -191,23 +207,11 @@ export const VideoVersionViewer = ({
     
     const aspectRatioClass = getAspectRatioClass(card);
     
-    // DEBUG: Log card rendering state
-    if (card.isUploadCard || (showUploadCard && card.id === 'upload')) {
-      console.log('RENDERING UPLOAD CARD:', {
-        cardId: card.id,
-        isUploadCard: card.isUploadCard,
-        showUploadCard: showUploadCard,
-        isUploading: isUploading,
-        isRegenerating: isRegenerating,
-        uploadLoadingMessage: uploadLoadingMessage
-      });
-    }
     
     // Upload card states (includes regeneration cards)
     if (card.isUploadCard || (showUploadCard && card.id === 'upload')) {
       // ALWAYS show loading animation when uploading (regardless of regeneration state)
       if (isUploading) {
-        console.log('SHOWING LOADING ANIMATION - isUploading=true');
         const displayMessage = uploadLoadingMessage;
         // Extract progress percentage from message
         let progressPercentage = 0;
@@ -248,7 +252,6 @@ export const VideoVersionViewer = ({
       
       // Regeneration button (when not uploading)
       if (isRegenerating && !isUploading) {
-        console.log('SHOWING REGENERATE BUTTON - isRegenerating=true, isUploading=false');
         // Regeneration ready state - show button before generation starts
         return (
           <div
@@ -464,9 +467,22 @@ export const VideoVersionViewer = ({
             </div>
           )}
 
-          {/* Delete icon - top right corner (hidden in selection mode) */}
+          {/* Download and Delete buttons - top right corner (hidden in selection mode) */}
           {!selectionMode && (
-            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1">
+              {/* Download button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent card click
+                  handleDownloadVideo(card.prompt.video_url, sceneId, card.version);
+                }}
+                className="bg-blue-500/90 hover:bg-blue-500 text-white p-1.5 rounded-full transition-colors duration-200"
+                aria-label={`Download version ${card.version}`}
+              >
+                <Download size={14} />
+              </button>
+              
+              {/* Delete button */}
               <button
                 onClick={(e) => {
                   e.stopPropagation(); // Prevent card click
@@ -554,11 +570,25 @@ export const VideoVersionViewer = ({
                       Created {new Date(selectedVideo.createdAt).toLocaleString()}
                     </p>
                   </div>
-                  {selectedVideo.isLatest && (
-                    <span className="bg-blue-500 text-white px-2 py-1 text-xs font-medium rounded-full">
-                      Latest
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {/* Download button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownloadVideo(selectedVideo.prompt.video_url, sceneId, selectedVideo.version);
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full transition-colors duration-200"
+                      aria-label={`Download version ${selectedVideo.version}`}
+                    >
+                      <Download size={16} />
+                    </button>
+                    
+                    {selectedVideo.isLatest && (
+                      <span className="bg-blue-500 text-white px-2 py-1 text-xs font-medium rounded-full">
+                        Latest
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

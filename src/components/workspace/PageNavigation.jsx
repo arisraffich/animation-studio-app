@@ -4,11 +4,7 @@ import { Home } from '../common/Icons';
 export const PageNavigation = ({ project, currentSceneId, setCurrentSceneId, goToDashboard }) => {
   const navItems = project.totalPages > 0 ? ['cover', ...Array.from({ length: project.totalPages }, (_, i) => String(i + 1)), 'end'] : [];
   
-  // Find first scene that hasn't been started (not completed or in_progress)
-  const firstPendingSceneIndex = navItems.findIndex(id => {
-    const scene = project.scenes[id];
-    return !scene || (scene.status !== 'completed' && scene.status !== 'in_progress');
-  });
+  // Allow flexible navigation to any page
 
   return (
     <nav className="w-full md:w-64 bg-gray-900/50 border-b md:border-b-0 md:border-r border-gray-800 p-4 flex flex-col">
@@ -17,7 +13,7 @@ export const PageNavigation = ({ project, currentSceneId, setCurrentSceneId, goT
       <ul className="space-y-2">
         {navItems.map((id, index) => {
           const isCurrent = id === currentSceneId;
-          const isDisabled = firstPendingSceneIndex !== -1 && index > firstPendingSceneIndex;
+          const isDisabled = false; // Allow navigation to any page
           const sceneStatus = project.scenes[id]?.status;
 
           let label = '';

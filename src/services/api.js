@@ -29,7 +29,7 @@ Return story pages with clean narrative text (remove page numbers from beginning
         schema: storyContentSchema.schema
       }
     },
-    max_output_tokens: 2000
+    max_output_tokens: 4000
   };
 
   try {
@@ -75,7 +75,7 @@ Return story pages with clean narrative text (remove page numbers from beginning
   }
 };
 
-// Build Seedance video prompt text with comment system support
+// Build advanced Seedance video prompt text with GPT-5 intelligence
 const buildSeedancePromptText = (project, sceneId, feedback, textData = null) => {
   // Extract text data from the scene or use provided textData
   const sceneData = project.scenes[sceneId];
@@ -101,9 +101,11 @@ const buildSeedancePromptText = (project, sceneId, feedback, textData = null) =>
     taskInstruction += ` FEEDBACK: ${feedback}`;
   }
 
-  let prompt = `Create a simple video prompt for this content:
+  let prompt = `TASK: Generate precise Seedance video prompt for children's book animation.
 
-Scene text: "${sceneText}"`;
+SCENE ANALYSIS:
+Text: "${sceneText}"
+Context: ${taskInstruction}`;
 
   if (animationNotes) {
     prompt += `
@@ -112,7 +114,28 @@ Animation notes: ${animationNotes}`;
 
   prompt += `
 
-${taskInstruction} Keep it to 1-2 sentences. Focus mainly on character movements (people and animals), with minimal environment details.`;
+STEP 1 - ACTION EXTRACTION:
+Identify the PRIMARY ACTION in scene text:
+- What is the main character doing? (walking, picking up, placing, etc.)
+- What objects are involved in the action?
+- What is the intended outcome of this action?
+
+STEP 2 - MOTION SPECIFICS:
+Design natural movement for extracted action:
+- Start position → end position
+- Speed and timing (slow/normal/quick)
+- Body language and facial expressions
+- Object physics and interactions
+
+STEP 3 - FIDELITY CONSTRAINTS:
+ONLY animate elements visible in input image:
+- Character positions must match illustration
+- Preserve original colors and materials of all objects exactly as shown
+- No additional characters or objects
+- Same background and composition
+- Static locked shot: maintain exact visual appearance of all elements
+
+Write a precise 1-2 sentence Seedance prompt for this 5-second video that focuses on the primary action while maintaining fidelity to the illustration.`;
 
   return prompt;
 };
@@ -206,16 +229,16 @@ const getSeedanceAspectRatio = (width, height) => {
 };
 
 // Seedance via Replicate API functions
-export const createSeedanceTask = async (imageBase64, seedancePrompt, imageDimensions, setError, generationId = null) => {
-  const aspectRatio = getSeedanceAspectRatio(imageDimensions.width, imageDimensions.height);
+export const createSeedanceTask = async (imageBase64, seedancePrompt, imageDimensions, setError, generationId = null, duration = 5) => {
+  const aspectRatio = imageDimensions ? getSeedanceAspectRatio(imageDimensions.width, imageDimensions.height) : '16:9';
   
   const payload = {
     input: {
       prompt: seedancePrompt,
-      image: `data:image/jpeg;base64,${imageBase64}`,
+      ...(imageBase64 ? { image: `data:image/jpeg;base64,${imageBase64}` } : {}),
       resolution: '1080p',  // Always use highest quality
       aspect_ratio: aspectRatio,
-      duration: 5,          // 5 second videos
+      duration: duration,   // Dynamic duration from GPT-5 analysis
       fps: 24,
       camera_fixed: true    // Prevent unwanted camera movements
     },
@@ -279,18 +302,16 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   setLoadingMessage('Creating animation...');
   const seedancePrompt = await generateSeedancePrompt(project, sceneId, imageBase64, feedback, setError, textData);
   
-  // Determine aspect ratio based on image dimensions
-  if (!imageDimensions) {
-    throw new Error('Image dimensions are required for Seedance generation');
-  }
-  
-  const aspectRatio = getSeedanceAspectRatio(imageDimensions.width, imageDimensions.height);
-  console.log(`Image dimensions: ${imageDimensions.width}x${imageDimensions.height}, using aspect ratio: ${aspectRatio}`);
+  // Determine aspect ratio based on image dimensions (default to 16:9 for text-only)
+  const aspectRatio = imageDimensions ? 
+    getSeedanceAspectRatio(imageDimensions.width, imageDimensions.height) : 
+    '16:9';
+  console.log(`Image dimensions: ${imageDimensions ? `${imageDimensions.width}x${imageDimensions.height}` : 'text-only'}, using aspect ratio: ${aspectRatio}`);
   console.log(`GPT-5 Enhanced Seedance prompt: "${seedancePrompt}"`);
   
-  // Create Seedance task with WebSocket support
+  // Create Seedance task with 5 second duration
   setLoadingMessage('Starting video generation...');
-  const predictionId = await createSeedanceTask(imageBase64, seedancePrompt, imageDimensions, setError, generationId);
+  const predictionId = await createSeedanceTask(imageBase64, seedancePrompt, imageDimensions, setError, generationId, 5);
   
   // Wait 10 seconds before starting to poll
   setLoadingMessage('Processing video...');
@@ -311,7 +332,8 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
         prediction_id: predictionId,
         model: 'seedance-gpt5',
         aspect_ratio: aspectRatio,
-        resolution: '1080p'
+        resolution: '1080p',
+        duration: 5
       };
     } else if (prediction.status === 'failed') {
       const errorMessage = prediction.error || 'Unknown error';
@@ -348,7 +370,8 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   throw new Error('Seedance generation timed out after 10 minutes');
 };
 
-// Enhanced Seedance prompt generation using GPT-5's superior reasoning  
+
+// Enhanced Seedance prompt generation using GPT-5's superior reasoning with dynamic duration
 export const generateSeedancePrompt = async (project, sceneId, imageBase64, feedback, setError, textData = null) => {
   const systemPrompt = buildSeedancePromptText(project, sceneId, feedback, textData);
   
@@ -366,7 +389,9 @@ export const generateSeedancePrompt = async (project, sceneId, imageBase64, feed
         ]
       }
     ],
-    max_output_tokens: 800
+    max_output_tokens: 1200,
+    reasoning: { "effort": "minimal" },
+    text: { "verbosity": "low" }
   };
 
   try {
@@ -382,23 +407,20 @@ export const generateSeedancePrompt = async (project, sceneId, imageBase64, feed
     }
 
     const result = await response.json();
-    console.log('Full GPT-5 Seedance Prompt Response:', JSON.stringify(result, null, 2));
     
     if (result.output && result.output.length > 0) {
       const messageOutput = result.output.find(output => output.type === 'message');
-      console.log('Seedance message output found:', messageOutput);
       
       if (messageOutput && messageOutput.content && messageOutput.content[0] && messageOutput.content[0].text) {
-        const promptText = messageOutput.content[0].text.trim();
-        console.log('Seedance prompt text:', promptText);
-        return promptText;
+        const responseText = messageOutput.content[0].text.trim();
+        
+        return responseText;
       }
       
       // Fallback: check if there's any text output in different format
       for (const output of result.output) {
         if (output.content && output.content[0] && output.content[0].text) {
           const promptText = output.content[0].text.trim();
-          console.log('Seedance prompt text (fallback):', promptText);
           return promptText;
         }
       }

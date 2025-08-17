@@ -90,7 +90,7 @@ export const ProjectsDashboard = ({
             {/* Project content */}
             <div className="flex-1">
               <h2 className="text-xl font-bold text-white">{p.name}</h2>
-              <p className="text-sm text-gray-400">{`By ${p.author || 'Unknown'} | ${p.totalPages || 0} Pages | Created: ${new Date(p.createdAt).toLocaleDateString()}`}</p>
+              <p className="text-sm text-gray-400">{`By ${p.author || 'Unknown'} | ${p.totalPages || 0} Pages | Created: ${new Date(p.createdAt).toLocaleDateString()} ${new Date(p.createdAt).toLocaleTimeString([], {hour12: false, hour: '2-digit', minute:'2-digit'})}`}</p>
             </div>
 
             {/* Actions */}

@@ -38,7 +38,6 @@ class WebSocketService {
         this.ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            console.log('WebSocket: Received progress update', data);
             
             if (data.type === 'progress') {
               // Find subscribers for this progress update
@@ -78,7 +77,6 @@ class WebSocketService {
   }
 
   subscribe(generationId, progressCallback) {
-    console.log('WebSocket: Subscribing to generation', generationId);
     
     // Store the callback
     this.subscribers.set(generationId, progressCallback);
@@ -98,7 +96,6 @@ class WebSocketService {
   }
 
   unsubscribe(generationId) {
-    console.log('WebSocket: Unsubscribing from generation', generationId);
     this.subscribers.delete(generationId);
   }
 

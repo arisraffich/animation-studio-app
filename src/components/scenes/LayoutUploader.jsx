@@ -99,7 +99,10 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
 
       const totalPages = storyContent.length;
       const storyText = storyContent.map(p => p.text).join('\n\n');
-      const scenes = { cover: { status: 'pending' }, end: { status: 'pending' } };
+      const scenes = { 
+        cover: { status: 'pending', text: `Text animation: "${coverAnalysis.title}" title slides in from left, glowing and growing larger. "${coverAnalysis.author}" author name fades in below with golden shimmer effect. Text pulses with energy and morphs with fluid motion. Cinematic title sequence with floating letters, color transitions, and dynamic typography movement. Text-only kinetic animation.` }, 
+        end: { status: 'pending' } 
+      };
       storyContent.forEach((page, index) => {
         scenes[String(index + 1)] = { status: 'pending', text: page.text };
       });
@@ -163,7 +166,11 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
 
       const finalScenes = {
         ...initialProjectState.scenes,
-        cover: { status: 'completed', prompt: newPrompt }
+        cover: { 
+          status: 'completed', 
+          prompt: newPrompt,
+          text: `Text animation: "${confirmedTitle}" title slides in from left, glowing and growing larger. "${confirmedAuthor}" author name fades in below with golden shimmer effect. Text pulses with energy and morphs with fluid motion. Cinematic title sequence with floating letters, color transitions, and dynamic typography movement. Text-only kinetic animation.`
+        }
       };
 
       const finalProjectState = {

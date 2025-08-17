@@ -51,12 +51,20 @@ export const CompletedSceneViewer = ({ sceneId, project, updateProject, setCurre
     <div className="bg-gray-800/50 p-6 rounded-lg">
       
       <div className="flex flex-wrap gap-4 items-center mb-4 pb-4 border-b border-gray-700">
-        <Button onClick={copyToClipboard} variant="primary">
-          <Clipboard size={16} /> {copySuccess || 'Copy Prompt'}
-        </Button>
-        <Button onClick={() => setIsRegenerating(prev => !prev)} variant="warning">
-          <RefreshCw size={16} /> {isRegenerating ? 'Cancel' : 'Regenerate'}
-        </Button>
+        {sceneId === 'cover' ? (
+          <Button onClick={() => setIsRegenerating(prev => !prev)} variant="primary">
+            <RefreshCw size={16} /> {isRegenerating ? 'Cancel' : 'Generate'}
+          </Button>
+        ) : (
+          <>
+            <Button onClick={copyToClipboard} variant="primary">
+              <Clipboard size={16} /> {copySuccess || 'Copy Prompt'}
+            </Button>
+            <Button onClick={() => setIsRegenerating(prev => !prev)} variant="warning">
+              <RefreshCw size={16} /> {isRegenerating ? 'Cancel' : 'Regenerate'}
+            </Button>
+          </>
+        )}
         {nextSceneId && (
           <Button onClick={() => setCurrentSceneId(nextSceneId)} variant="secondary">
             Go to Next Scene <ArrowRight size={16} />
