@@ -79,7 +79,11 @@ export const deleteImage = async (imagePath) => {
     await deleteObject(imageRef);
     console.log('Storage: Image deleted:', imagePath);
   } catch (error) {
-    console.error('Storage: Delete failed:', error);
+    if (error.code === 'storage/object-not-found') {
+      console.log('Storage: File already deleted or never existed:', imagePath);
+    } else {
+      console.error('Storage: Delete failed:', error);
+    }
     // Don't throw error - missing files are acceptable
   }
 };
@@ -133,9 +137,73 @@ export const deleteVersionImage = async (projectId, sceneId, versionId) => {
   try {
     const imagePath = `projects/${projectId}/scenes/${sceneId}/versions/${versionId}.jpg`;
     await deleteImage(imagePath);
-    console.log(`Storage: Deleted image for version ${versionId}`);
+    console.log(`Storage: Cleaned up image for version ${versionId}`);
   } catch (error) {
-    console.error('Storage: Version image cleanup failed:', error);
+    console.log(`Storage: Version image cleanup completed for ${versionId}`);
+    // Don't throw error - allow version deletion to continue
+  }
+};
+
+// ====================
+// MUSIC FILE STORAGE OPERATIONS
+// ====================
+
+/**
+ * Upload music from blob (for ElevenLabs direct response)
+ */
+export const uploadMusicFromBlob = async (projectId, sceneId, versionId, musicBlob, metadata = {}) => {
+  try {
+    console.log('Storage: Uploading music blob for project:', projectId);
+    
+    // Create storage reference with proper path structure
+    const musicPath = `projects/${projectId}/scenes/${sceneId}/versions/${versionId}.mp3`;
+    const musicRef = ref(storage, musicPath);
+    
+    // Set metadata following Firebase docs
+    const uploadMetadata = {
+      contentType: 'audio/mpeg',
+      cacheControl: 'public,max-age=3600', // 1 hour cache
+      customMetadata: {
+        uploadType: 'music-blob',
+        originalSize: musicBlob.size.toString(),
+        ...metadata
+      }
+    };
+    
+    console.log('Storage: Uploading music to', musicPath);
+    
+    // Upload music file with metadata
+    const uploadTask = await uploadBytes(musicRef, musicBlob, uploadMetadata);
+    
+    // Get download URL
+    const downloadURL = await getDownloadURL(uploadTask.ref);
+    console.log('Storage: Music uploaded successfully, URL:', downloadURL);
+    
+    return {
+      url: downloadURL,
+      path: musicPath,
+      size: musicBlob.size,
+      uploadedAt: new Date().toISOString(),
+      metadata
+    };
+  } catch (error) {
+    console.error('Storage: Error uploading music blob:', error);
+    throw new Error(`Failed to upload music: ${error.message}`);
+  }
+};
+
+// uploadMusicFromUrl removed - was for MusicGen/Replicate, now using uploadMusicFromBlob for ElevenLabs
+
+/**
+ * Delete music file for a specific version
+ */
+export const deleteVersionMusic = async (projectId, sceneId, versionId) => {
+  try {
+    const musicPath = `projects/${projectId}/scenes/${sceneId}/versions/${versionId}.mp3`;
+    await deleteObject(ref(storage, musicPath));
+    console.log(`Storage: Deleted music for version ${versionId}`);
+  } catch (error) {
+    console.error('Storage: Version music cleanup failed:', error);
     // Don't throw error - allow version deletion to continue
   }
 };

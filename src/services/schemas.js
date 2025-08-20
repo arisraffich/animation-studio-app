@@ -22,9 +22,41 @@ export const storyContentSchema = {
           required: ["page_number", "text"],
           additionalProperties: false
         }
+      },
+      end_scene_elements: {
+        type: "object",
+        description: "Key story elements to create a beautiful end scene without characters",
+        properties: {
+          main_setting: {
+            type: "string",
+            description: "The primary location/environment where most of the story takes place (e.g., 'cozy bedroom', 'magical forest', 'school playground')"
+          },
+          key_objects: {
+            type: "array",
+            description: "2-3 memorable objects from the story that represent the journey",
+            items: {
+              type: "string"
+            },
+            maxItems: 3
+          },
+          mood: {
+            type: "string",
+            description: "Overall emotional tone for the ending (e.g., 'peaceful and satisfied', 'triumphant and joyful', 'warm and cozy')"
+          },
+          color_palette: {
+            type: "string",
+            description: "Dominant colors or lighting that would represent the story's atmosphere (e.g., 'warm golden sunset', 'soft pastel blues and greens', 'rich autumn colors')"
+          }
+        },
+        required: ["main_setting", "key_objects", "mood", "color_palette"],
+        additionalProperties: false
+      },
+      background_music_prompt: {
+        type: "string",
+        description: "A concise ElevenLabs music prompt (maximum 50 words) for background music. Should be simple and direct: '[Musical style] [mood/emotion], [key instruments], [tempo description]'. Example: 'Upbeat acoustic children's music, joyful and inspiring, bright guitar with lively strings'."
       }
     },
-    required: ["story_pages"],
+    required: ["story_pages", "end_scene_elements", "background_music_prompt"],
     additionalProperties: false
   }
 };

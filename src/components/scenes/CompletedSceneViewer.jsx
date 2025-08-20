@@ -7,6 +7,16 @@ export const CompletedSceneViewer = ({ sceneId, project, updateProject, setCurre
   const sceneData = project.scenes[sceneId];
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [copySuccess, setCopySuccess] = useState('');
+  
+  // Selection mode state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedVersions, setSelectedVersions] = useState(new Set());
+
+  // Check if there are existing videos
+  const videoVersions = sceneData?.videoVersions || [];
+  const videosWithUrls = videoVersions.filter(v => v.prompt?.video_url);
+  const hasExistingVideos = videosWithUrls.length > 0;
+  const legacyVideo = sceneData?.prompt?.video_url && videoVersions.length === 0;
 
   const copyToClipboard = async () => {
     if (!sceneData?.prompt) return;
@@ -51,19 +61,38 @@ export const CompletedSceneViewer = ({ sceneId, project, updateProject, setCurre
     <div className="bg-gray-800/50 p-6 rounded-lg">
       
       <div className="flex flex-wrap gap-4 items-center mb-4 pb-4 border-b border-gray-700">
-        {sceneId === 'cover' ? (
-          <Button onClick={() => setIsRegenerating(prev => !prev)} variant="primary">
-            <RefreshCw size={16} /> {isRegenerating ? 'Cancel' : 'Generate'}
-          </Button>
-        ) : (
-          <>
-            <Button onClick={copyToClipboard} variant="primary">
-              <Clipboard size={16} /> {copySuccess || 'Copy Prompt'}
-            </Button>
-            <Button onClick={() => setIsRegenerating(prev => !prev)} variant="warning">
-              <RefreshCw size={16} /> {isRegenerating ? 'Cancel' : 'Regenerate'}
-            </Button>
-          </>
+        <Button onClick={copyToClipboard} variant="primary">
+          <Clipboard size={16} /> {copySuccess || 'Copy Prompt'}
+        </Button>
+        <Button onClick={() => setIsRegenerating(prev => !prev)} variant="warning">
+          <RefreshCw size={16} /> {isRegenerating ? 'Cancel' : 'Regenerate'}
+        </Button>
+        {(hasExistingVideos || legacyVideo) && (
+          <button
+            onClick={() => setSelectionMode(!selectionMode)} 
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+              selectionMode 
+                ? 'bg-orange-600/20 text-orange-300 border border-orange-500/30 hover:bg-orange-600/30' 
+                : 'bg-gray-700/50 text-gray-300 border border-gray-600/50 hover:bg-gray-600/50 hover:text-white hover:border-gray-500'
+            }`}
+          >
+            {selectionMode ? (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 18L18 6M6 6l12 12" strokeWidth="2"/>
+                </svg>
+                Exit Selection
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="2"/>
+                  <path d="M9 12l2 2 4-4" strokeWidth="2"/>
+                </svg>
+                Select Videos
+              </>
+            )}
+          </button>
         )}
         {nextSceneId && (
           <Button onClick={() => setCurrentSceneId(nextSceneId)} variant="secondary">
@@ -80,6 +109,10 @@ export const CompletedSceneViewer = ({ sceneId, project, updateProject, setCurre
           setError={setError}
           isRegenerating={isRegenerating}
           onCancelRegeneration={() => setIsRegenerating(false)}
+          selectionMode={selectionMode}
+          selectedVersions={selectedVersions}
+          setSelectedVersions={setSelectedVersions}
+          onExitSelectionMode={() => setSelectionMode(false)}
         />
       </div>
     </div>

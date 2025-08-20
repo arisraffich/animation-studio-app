@@ -22,9 +22,9 @@ export const ProjectWorkspace = ({ project, updateProject, goToDashboard, librar
   }, [project.id]);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col md:flex-row">
+    <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col md:flex-row h-screen">
       <PageNavigation project={project} currentSceneId={currentSceneId} setCurrentSceneId={setCurrentSceneId} goToDashboard={goToDashboard} />
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto" style={{maxHeight: '100vh'}}>
+      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-hidden h-full">
         {error && (
           <div className="w-full bg-red-500/20 border border-red-500 text-red-300 p-4 rounded-lg mb-4 flex gap-2">
             <AlertTriangle className="flex-shrink-0" />

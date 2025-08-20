@@ -2,15 +2,40 @@ import { storyContentSchema, coverAnalysisSchema, animationPromptSchema } from '
 
 // Extract story content from PDF pages using GPT-5
 export const findStoryContent = async (allPagesText, setError) => {
-  const promptText = `Analyze these PDF pages and identify which contain the main story narrative.
+  // Process all pages - no sampling to avoid missing story content
+  const pagesToAnalyze = allPagesText;
+
+  const promptText = `Analyze these PDF pages and identify which contain the main story narrative. Also extract key story elements for creating a beautiful end scene.
 
 PAGES:
-${allPagesText.map(p => `Page ${p.pageNum}: "${p.text}"`).join('\n')}
+${pagesToAnalyze.map(p => `Page ${p.pageNum}: "${p.text.substring(0, 500)}${p.text.length > 500 ? '...' : ''}"`).join('\n')}
 
+STORY PAGE ANALYSIS:
 INCLUDE: Pages with narrative, dialogue, character actions, story events
 EXCLUDE: Title pages, copyright, dedications, "The End" pages, blank pages, publisher info
 
-Return story pages with clean narrative text (remove page numbers from beginning of text).`;
+Return ALL story pages found that contain actual narrative content.
+
+END SCENE ELEMENTS ANALYSIS:
+From the complete story, identify:
+- Main setting/environment where most action occurs (no characters, just the location)
+- 2-3 key objects that represent the story journey (toys, tools, magical items, etc.)
+- Overall mood for a satisfying conclusion
+- Dominant colors/lighting that capture the story's atmosphere
+
+This will be used to create a beautiful "The End" scene with story elements but no characters.
+
+BACKGROUND MUSIC ANALYSIS:
+Generate a concise ElevenLabs music prompt (maximum 50 words) for upbeat background music for children's stories. IMPORTANT: Always create energetic, positive music regardless of the specific story mood - children's content should have dynamic, inspiring soundtracks.
+
+Format: "[Musical style] [mood/emotion], [key instruments], [tempo description]"
+
+Examples:
+- "Upbeat acoustic children's music, joyful and inspiring, bright guitar with lively strings"
+- "Dynamic folk background music, energetic and positive, ukulele with cheerful percussion" 
+- "Vibrant orchestral piece, adventurous and uplifting, playful woodwinds and piano"
+
+Create a short, energetic prompt that ignores story mood and focuses on positive, upbeat children's music.`;
 
   const payload = {
     model: "gpt-5",
@@ -29,7 +54,8 @@ Return story pages with clean narrative text (remove page numbers from beginning
         schema: storyContentSchema.schema
       }
     },
-    max_output_tokens: 4000
+    max_output_tokens: 4000,
+    reasoning: { "effort": "minimal" }  // Reduce reasoning effort for speed
   };
 
   try {
@@ -45,18 +71,21 @@ Return story pages with clean narrative text (remove page numbers from beginning
     }
 
     const result = await response.json();
-    console.log('Full GPT-5 Story Content Response:', JSON.stringify(result, null, 2));
     
     if (result.output && result.output.length > 0) {
       const messageOutput = result.output.find(output => output.type === 'message');
-      console.log('Message output found:', messageOutput);
       
       if (messageOutput && messageOutput.content && messageOutput.content[0] && messageOutput.content[0].text) {
-        console.log('Raw JSON text:', messageOutput.content[0].text);
         try {
           const parsedJson = JSON.parse(messageOutput.content[0].text);
-          console.log('GPT-5 Enhanced Story Content Analysis:', parsedJson);
-          return parsedJson.story_pages;
+          
+          // Return exactly the story pages GPT-5 identified - no reconstruction needed
+          
+          return {
+            story_pages: parsedJson.story_pages,
+            end_scene_elements: parsedJson.end_scene_elements,
+            background_music_prompt: parsedJson.background_music_prompt
+          };
         } catch (parseError) {
           console.error('JSON parsing failed:', parseError.message);
           console.error('Failed at character position:', parseError.message.match(/column (\d+)/)?.[1] || 'unknown');
@@ -90,7 +119,7 @@ const buildSeedancePromptText = (project, sceneId, feedback, textData = null) =>
   
   let taskInstruction = '';
   if (sceneId === 'cover') {
-    taskInstruction = `This is the COVER SCENE. Focus on creating a cinematic title sequence.`;
+    taskInstruction = `This is the COVER PAGE. Create a modern, character-focused animation that brings the cover illustration to life.`;
   } else if (sceneId === 'end') {
     taskInstruction = `This is the final scene. Create a gentle, concluding animation.`;
   } else {
@@ -101,7 +130,9 @@ const buildSeedancePromptText = (project, sceneId, feedback, textData = null) =>
     taskInstruction += ` FEEDBACK: ${feedback}`;
   }
 
-  let prompt = `TASK: Generate precise Seedance video prompt for children's book animation.
+  let prompt = `You are an expert video animation director specializing in children's book illustrations and AI video generation.
+
+TASK: Generate precise Seedance video prompt for children's book animation.
 
 SCENE ANALYSIS:
 Text: "${sceneText}"
@@ -112,7 +143,40 @@ Context: ${taskInstruction}`;
 Animation notes: ${animationNotes}`;
   }
 
-  prompt += `
+  // Enhanced prompt generation based on scene type
+  if (sceneId === 'cover') {
+    prompt += `
+
+SEEDANCE PRO 1.0 COVER ANIMATION REQUIREMENTS:
+
+STEP 1 - CHARACTER FOCUS:
+Identify the main character(s) in the cover illustration:
+- What is the character's pose and expression?
+- How can we create subtle, natural movement? (breathing, hair movement, clothes sway)
+- What personality does the character convey?
+
+STEP 2 - SUPPORTING ELEMENTS:
+Animate environmental elements that enhance the scene:
+- Background elements (trees swaying, clouds drifting, water flowing)
+- Objects and props (subtle movement, physics)
+- Atmospheric effects (particles, light shifts)
+
+STEP 3 - TEXT ANIMATION (MODERN APPROACH):
+For title and author text visible in the image:
+- Use subtle modern effects: gentle fade-in, soft scale, elegant drift
+- NO old-fashioned glow or harsh effects
+- Text animation should feel contemporary and sophisticated
+- Keep text movements minimal and tasteful
+
+STEP 4 - TECHNICAL EXECUTION:
+- Use "Subject + Action" format with motion intensity
+- Specify camera as "static locked shot" to maintain cover composition  
+- Duration: 5 seconds with smooth, looped motion
+- Preserve exact visual appearance and colors of all illustration elements
+
+Generate a video prompt (3-4 sentences) that creates a modern, character-focused cover animation with supporting environmental movement and contemporary text effects.`;
+  } else {
+    prompt += `
 
 STEP 1 - ACTION EXTRACTION:
 Identify the PRIMARY ACTION in scene text:
@@ -136,6 +200,7 @@ ONLY animate elements visible in input image:
 - Static locked shot: maintain exact visual appearance of all elements
 
 Write a precise 1-2 sentence Seedance prompt for this 5-second video that focuses on the primary action while maintaining fidelity to the illustration.`;
+  }
 
   return prompt;
 };
@@ -299,22 +364,17 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   const { imageDimensions = null, textData = null, generationId = null, websocketCallback = null } = options;
   
   // Generate prompt with GPT-5 for superior analysis
-  setLoadingMessage('Creating animation...');
   const seedancePrompt = await generateSeedancePrompt(project, sceneId, imageBase64, feedback, setError, textData);
   
   // Determine aspect ratio based on image dimensions (default to 16:9 for text-only)
   const aspectRatio = imageDimensions ? 
     getSeedanceAspectRatio(imageDimensions.width, imageDimensions.height) : 
     '16:9';
-  console.log(`Image dimensions: ${imageDimensions ? `${imageDimensions.width}x${imageDimensions.height}` : 'text-only'}, using aspect ratio: ${aspectRatio}`);
-  console.log(`GPT-5 Enhanced Seedance prompt: "${seedancePrompt}"`);
   
   // Create Seedance task with 5 second duration
-  setLoadingMessage('Starting video generation...');
   const predictionId = await createSeedanceTask(imageBase64, seedancePrompt, imageDimensions, setError, generationId, 5);
   
   // Wait 10 seconds before starting to poll
-  setLoadingMessage('Processing video...');
   await new Promise(resolve => setTimeout(resolve, 10000));
   
   // Poll for completion
@@ -357,7 +417,7 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
       // Convert to visual percentage (30% actual = 100% visual)
       const currentProgress = Math.min(100, (actualProgress / 30) * 100);
       
-      setLoadingMessage(`Generating video... ${Math.round(currentProgress)}%`);
+      // Let WebSocket/fallback handle progress display
     }
     // WebSocket updates will be handled by the callback automatically
     
@@ -369,6 +429,7 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
   // If we get here, polling timed out
   throw new Error('Seedance generation timed out after 10 minutes');
 };
+
 
 
 // Enhanced Seedance prompt generation using GPT-5's superior reasoning with dynamic duration
@@ -464,11 +525,17 @@ export const analyzeCover = async (imageBase64, setError) => {
   };
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45000); // 45 second timeout for cover analysis
+    
     const response = await fetch('/api/openai', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
+    
+    clearTimeout(timeout);
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -476,14 +543,11 @@ export const analyzeCover = async (imageBase64, setError) => {
     }
 
     const result = await response.json();
-    console.log('Full GPT-5 Cover Analysis Response:', JSON.stringify(result, null, 2));
     
     if (result.output && result.output.length > 0) {
       const messageOutput = result.output.find(output => output.type === 'message');
-      console.log('Message output found:', messageOutput);
       if (messageOutput && messageOutput.content && messageOutput.content[0] && messageOutput.content[0].text) {
         const coverData = JSON.parse(messageOutput.content[0].text);
-        console.log('GPT-5 Enhanced Cover Analysis:', coverData);
         return coverData;
       }
     }
@@ -492,6 +556,11 @@ export const analyzeCover = async (imageBase64, setError) => {
     throw new Error('GPT-5 returned an invalid response for cover analysis.');
   } catch (err) {
     console.error("Error in analyzeCover:", err);
+    if (err.name === 'AbortError') {
+      const timeoutError = 'Cover analysis timed out - please try again.';
+      setError(timeoutError);
+      throw new Error(timeoutError);
+    }
     setError(`Cover analysis failed: ${err.message}`);
     throw err;
   }
@@ -544,7 +613,6 @@ export const generateScene = async (project, sceneId, imageBase64, feedback, set
       
       if (messageOutput && messageOutput.content && messageOutput.content[0] && messageOutput.content[0].text) {
         const parsedJson = JSON.parse(messageOutput.content[0].text);
-        console.log('GPT-5 Enhanced Scene Generation:', parsedJson);
         return parsedJson;
       }
     }
@@ -554,6 +622,69 @@ export const generateScene = async (project, sceneId, imageBase64, feedback, set
   } catch (err) {
     console.error("Error in generateScene:", err);
     setError(err.message);
+    throw err;
+  }
+};
+
+// ElevenLabs Music API Integration for background music generation
+export const generateMusicWithElevenLabs = async (musicPrompt, setError, setLoadingMessage, options = {}) => {
+  const { generationId = null, websocketCallback = null } = options;
+  
+  try {
+    setLoadingMessage('Creating music with ElevenLabs...');
+    
+    // Create composition plan with upbeat requirements to override story mood
+    const compositionPlan = {
+      positive_global_styles: ["upbeat", "energetic", "children's music", "positive", "cheerful"],
+      negative_global_styles: ["gentle", "slow", "ambient", "sad", "melancholy"],
+      sections: [{
+        section_name: "Main Theme",
+        positive_local_styles: ["dynamic", "lively", "inspiring"],
+        negative_local_styles: ["calm", "peaceful", "quiet"],
+        duration_ms: 120000, // 2 minutes (API max per section)
+        lines: ["Upbeat children's background music"] // Required field
+      }]
+    };
+    
+    const musicInput = {
+      composition_plan: compositionPlan, // Use composition plan only (forces upbeat music)
+      model_id: "music_v1"
+      // Note: music_length_ms is controlled by composition_plan section durations
+    };
+    
+    // Direct API call to ElevenLabs
+    const response = await fetch('https://api.elevenlabs.io/v1/music', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'xi-api-key': 'sk_ae3474dc3b5cf90d49c3db3ffbf043f56945f2a5a5452ac1'
+      },
+      body: JSON.stringify(musicInput)
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`ElevenLabs Music Error: ${response.status} ${response.statusText} - ${errorBody}`);
+    }
+
+    // ElevenLabs returns audio directly, no polling needed
+    const audioBlob = await response.blob();
+    
+    // Convert blob to data URL for immediate use
+    const audioUrl = URL.createObjectURL(audioBlob);
+    
+    return {
+      prompt: musicPrompt,
+      audio_url: audioUrl, // Blob URL for immediate playback
+      audio_blob: audioBlob, // For file operations
+      model: 'elevenlabs-music-v1',
+      format: 'mp3',
+      duration: 120 // 2 minutes
+    };
+    
+  } catch (err) {
+    console.error('Error in generateMusicWithElevenLabs:', err);
+    setError(`Music generation failed: ${err.message}`);
     throw err;
   }
 };

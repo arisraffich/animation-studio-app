@@ -17,7 +17,6 @@ function App() {
   const [librariesLoaded, setLibrariesLoaded] = useState(false);
   const [libraryError, setLibraryError] = useState('');
   const [projectToDelete, setProjectToDelete] = useState(null);
-  // Removed unused firebaseLoaded state
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState('');

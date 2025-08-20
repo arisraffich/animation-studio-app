@@ -6,6 +6,7 @@ import {
   addDoc, 
   updateDoc, 
   deleteDoc, 
+  deleteField,
   serverTimestamp,
   orderBy,
   query 
@@ -79,11 +80,38 @@ export const createProject = async (projectData) => {
   }
 };
 
+// Helper function to remove undefined values from objects
+const cleanUndefinedValues = (obj) => {
+  if (obj === null || obj === undefined) {
+    return null;
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(cleanUndefinedValues).filter(item => item !== undefined);
+  }
+  
+  if (typeof obj === 'object') {
+    const cleaned = {};
+    Object.keys(obj).forEach(key => {
+      const value = obj[key];
+      if (value !== undefined) {
+        cleaned[key] = cleanUndefinedValues(value);
+      }
+    });
+    return cleaned;
+  }
+  
+  return obj;
+};
+
 export const updateProject = async (projectId, updates) => {
   try {
+    // Clean undefined values before sending to Firebase
+    const cleanedUpdates = cleanUndefinedValues(updates);
+    
     const docRef = doc(db, PROJECTS_COLLECTION, projectId);
     await updateDoc(docRef, {
-      ...updates,
+      ...cleanedUpdates,
       updatedAt: serverTimestamp()
     });
     
@@ -115,6 +143,9 @@ export const deleteProject = async (projectId) => {
 // ====================
 // PROJECT DATA MIGRATION
 // ====================
+
+// Export deleteField for use in other components
+export { deleteField };
 
 export const migrateLocalStorageToFirebase = async () => {
   try {

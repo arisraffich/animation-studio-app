@@ -1,7 +1,23 @@
 import { useState } from 'react';
 import { Loader2, UploadCloud } from '../common/Icons';
 import { CoverInfoConfirmationModal } from '../common/CoverInfoModal';
-import { findStoryContent, generateScene, analyzeCover } from '../../services/api';
+import { findStoryContent, generateScene, analyzeCover, generateSeedancePrompt } from '../../services/api';
+import { uploadImageFromBase64 } from '../../services/storageService';
+
+// Generate end scene text from story elements
+const generateEndSceneText = (endSceneElements) => {
+  if (!endSceneElements) {
+    return '[Static locked shot] A peaceful school setting holds still as "The End" text gracefully fades in at center screen, with no other text visible. Rendered in children\'s book illustration style with hand-drawn animation and gentle 2D animated illustration movement.';
+  }
+  
+  const { main_setting, key_objects, mood, color_palette } = endSceneElements;
+  const objectsText = key_objects && key_objects.length > 0 ? key_objects.join(', ') : 'story elements';
+  
+  // Create Seedance Pro 1 optimized prompt with rich story details
+  const seedancePrompt = `[Static locked shot] ${main_setting} bathed in ${color_palette} lighting with warm atmospheric glow. ${objectsText} rest peacefully throughout the scene, creating a ${mood} atmosphere. Only "The End" text appears with sophisticated fade-in animation at center screen - no other text or words visible. Rendered in children's book illustration style with hand-drawn animation and gentle 2D animated illustration movement.`;
+  
+  return seedancePrompt;
+};
 
 export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setError }) => {
   const [isFileParsing, setIsFileParsing] = useState(false);
@@ -17,9 +33,11 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
     setError('');
 
     try {
+      const startTime = performance.now();
       setLoadingMessage('Extracting text from PDF...');
       let coverImageBase64 = '';
       let pageDimensions = null;
+      let coverStorageData = null;
       const allPagesText = [];
 
       if (file.type === 'application/pdf') {
@@ -30,9 +48,9 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
         // OPTIMIZATION: Extract text and cover image in parallel
         setLoadingMessage('Processing PDF pages...');
         const textExtractionPromise = (async () => {
-          // OPTIMIZATION: Extract text from multiple pages in parallel (chunks of 5)
+          // OPTIMIZATION: Extract text from multiple pages in parallel (chunks of 10)
           const pages = [];
-          const chunkSize = 5; // Process 5 pages at a time to avoid overwhelming the browser
+          const chunkSize = 10; // Process 10 pages at a time for faster processing
           
           for (let i = 1; i <= pdf.numPages; i += chunkSize) {
             const chunkPromises = [];
@@ -74,36 +92,68 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
         })();
         
         // Wait for both operations to complete
+        const pdfStartTime = performance.now();
         const [extractedPages, coverData] = await Promise.all([textExtractionPromise, coverExtractionPromise]);
+        const pdfEndTime = performance.now();
+        
         allPagesText.push(...extractedPages);
         coverImageBase64 = coverData.base64;
         pageDimensions = coverData.dimensions;
-        
-        console.log('OPTIMIZATION: PDF processing completed in parallel');
       } else {
         throw new Error("Unsupported file type. Please upload a PDF file.");
       }
       
-      // OPTIMIZATION: Run story analysis and cover analysis in parallel
-      setLoadingMessage('Analyzing content with AI...');
-      const [storyContent, coverAnalysis] = await Promise.all([
+      // OPTIMIZATION: Run all three operations in parallel for maximum speed
+      setLoadingMessage('Analyzing content and uploading cover...');
+      const aiStartTime = performance.now();
+      const [storyContent, coverAnalysis, storageUpload] = await Promise.all([
         findStoryContent(allPagesText, setError),
-        analyzeCover(coverImageBase64, setError)
+        analyzeCover(coverImageBase64, setError),
+        (async () => {
+          const tempProjectId = project.id || `temp_${Date.now()}`;
+          return await uploadImageFromBase64(
+            tempProjectId,
+            'cover', 
+            'v1',
+            coverImageBase64
+          );
+        })()
       ]);
+      const aiEndTime = performance.now();
       
-      console.log('OPTIMIZATION: AI analysis completed in parallel');
+      coverStorageData = storageUpload;
       
-      if (!storyContent || storyContent.length === 0) {
+      if (!storyContent || !storyContent.story_pages || storyContent.story_pages.length === 0) {
         throw new Error("AI could not identify the main story pages in the document.");
       }
 
-      const totalPages = storyContent.length;
-      const storyText = storyContent.map(p => p.text).join('\n\n');
+      const totalPages = storyContent.story_pages.length;
+      const storyText = storyContent.story_pages.map(p => p.text).join('\n\n');
+      const endSceneElements = storyContent.end_scene_elements;
+      const backgroundMusicPrompt = storyContent.background_music_prompt;
       const scenes = { 
-        cover: { status: 'pending', text: `Text animation: "${coverAnalysis.title}" title slides in from left, glowing and growing larger. "${coverAnalysis.author}" author name fades in below with golden shimmer effect. Text pulses with energy and morphs with fluid motion. Cinematic title sequence with floating letters, color transitions, and dynamic typography movement. Text-only kinetic animation.` }, 
-        end: { status: 'pending' } 
+        cover: { 
+          status: 'pending', 
+          text: `Cover page illustration featuring "${coverAnalysis.title}" by ${coverAnalysis.author}. Advanced GPT-5 prompt generation will analyze the cover art to create sophisticated character-focused animation with environmental storytelling elements.`,
+          storedImage: {
+            url: coverStorageData.url,
+            path: coverStorageData.path,
+            dimensions: pageDimensions,
+            uploadedAt: new Date().toISOString()
+          }
+        }, 
+        end: { 
+          status: 'pending',
+          text: generateEndSceneText(endSceneElements),
+          endSceneElements: endSceneElements
+        },
+        music: {
+          status: 'pending',
+          text: backgroundMusicPrompt,
+          type: 'music' // Identify this as a music scene
+        }
       };
-      storyContent.forEach((page, index) => {
+      storyContent.story_pages.forEach((page, index) => {
         scenes[String(index + 1)] = { status: 'pending', text: page.text };
       });
       
@@ -121,8 +171,8 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
       const aiGuessedTitle = coverAnalysis.title || file.name.replace(/\.pdf$/i, '') || 'Untitled Project';
       const aiGuessedAuthor = coverAnalysis.author || 'Unknown Author';
       
-      console.log('OPTIMIZATION: Skipping cover generation for faster initial load');
-      setPendingCoverInfo({ initialProjectState, coverImageBase64, aiGuessedTitle, aiGuessedAuthor });
+      const totalTime = performance.now() - startTime;
+      setPendingCoverInfo({ initialProjectState, coverStorageData, aiGuessedTitle, aiGuessedAuthor });
 
     } catch (err) {
       setError(err.message);
@@ -131,7 +181,7 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
   };
 
   const handleConfirmCoverInfo = async ({ confirmedTitle, confirmedAuthor }) => {
-    const { initialProjectState, coverImageBase64 } = pendingCoverInfo;
+    const { initialProjectState, coverStorageData } = pendingCoverInfo;
     const originalPendingInfo = pendingCoverInfo; // Save for error recovery
 
     try {
@@ -147,29 +197,45 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
         author: confirmedAuthor
       };
       
-      console.log('Calling generateScene with:', { 
-        projectName: projectWithConfirmedInfo.name,
-        sceneId: 'cover',
-        hasImage: !!coverImageBase64,
-        imageLength: coverImageBase64?.length 
-      });
       
       // Create a local error handler to ensure proper context
       const handleGenerationError = (errorMessage) => {
-        console.error('Generation error from API:', errorMessage);
         setError(errorMessage);
       };
       
+      // Fetch image from Firebase Storage for GPT-5 analysis
+      const imageResponse = await fetch('/api/firebase-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: coverStorageData.url })
+      });
+      
+      if (!imageResponse.ok) {
+        throw new Error(`Failed to fetch cover image: ${imageResponse.status}`);
+      }
+      
+      const { base64: coverImageBase64 } = await imageResponse.json();
+      // Generate sophisticated Seedance prompt using GPT-5's advanced cover analysis
+      const seedancePrompt = await generateSeedancePrompt(projectWithConfirmedInfo, 'cover', coverImageBase64, '', handleGenerationError);
+      
+      // Also generate structured prompt for completeness
       const newPrompt = await generateScene(projectWithConfirmedInfo, 'cover', coverImageBase64, '', handleGenerationError);
       newPrompt.extracted_title = confirmedTitle;
       newPrompt.extracted_author = confirmedAuthor;
+      newPrompt.seedance_prompt = seedancePrompt; // Store the sophisticated prompt
 
       const finalScenes = {
         ...initialProjectState.scenes,
         cover: { 
           status: 'completed', 
           prompt: newPrompt,
-          text: `Text animation: "${confirmedTitle}" title slides in from left, glowing and growing larger. "${confirmedAuthor}" author name fades in below with golden shimmer effect. Text pulses with energy and morphs with fluid motion. Cinematic title sequence with floating letters, color transitions, and dynamic typography movement. Text-only kinetic animation.`
+          text: seedancePrompt, // Use the GPT-5 generated sophisticated prompt as text
+          storedImage: {
+            url: coverStorageData.url,
+            path: coverStorageData.path,
+            dimensions: initialProjectState.pageDimensions,
+            uploadedAt: new Date().toISOString()
+          }
         }
       };
 
@@ -184,14 +250,7 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
       setCurrentSceneId('cover');
       setIsFileParsing(false);
       
-      console.log('OPTIMIZATION: Cover scene generated after user confirmation');
     } catch (err) {
-      console.error('Cover generation failed:', err);
-      console.error('Error details:', {
-        name: err.name,
-        message: err.message,
-        stack: err.stack
-      });
       setError(`Cover generation failed: ${err.message}`);
       setIsFileParsing(false);
       // On error, show the confirmation modal again so user can retry

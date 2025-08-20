@@ -16,7 +16,6 @@ export const VideoVersionViewer = ({
   selectionMode = false,
   selectedVersions = new Set(),
   onToggleVersionSelection = null,
-  // Removed unused onBulkDelete prop
   onGenerate = null,
   hasUploadedImage = false,
   isUploadingToStorage = false,
@@ -25,22 +24,39 @@ export const VideoVersionViewer = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef(null);
+
   
-  // Download video function
-  const handleDownloadVideo = async (videoUrl, sceneId, version) => {
+  // Download video/music function
+  const handleDownloadMedia = async (mediaUrl, sceneId, version, isMusic = false) => {
     try {
-      const response = await fetch(videoUrl);
+      const filename = isMusic ? `scene_${sceneId}_v${version}.mp3` : `scene_${sceneId}_v${version}.mp4`;
+      
+      // Check if this is a blob URL (from ElevenLabs) - handle directly
+      if (mediaUrl.startsWith('blob:')) {
+        const link = document.createElement('a');
+        link.href = mediaUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+      
+      // For regular URLs (Firebase Storage, external APIs)
+      const response = await fetch(mediaUrl);
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `scene_${sceneId}_v${version}.mp4`;
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Download failed:', error);
+      // Fallback: open URL in new tab
+      window.open(mediaUrl, '_blank');
     }
   };
   
@@ -49,25 +65,39 @@ export const VideoVersionViewer = ({
   
   // Check if we have stored image data for regeneration
   const storedImageData = sceneData?.storedImage;
-  // Removed unused showRegenerateUI variable
+  
   
   // Always use videoVersions if available, regardless of legacy video
   let allVersions = videoVersions;
   
-  // If no versions exist but there's a legacy video, create one version from it
-  if (videoVersions.length === 0 && sceneData?.prompt?.video_url) {
-    allVersions = [{
-      id: 'legacy',
-      version: 1,
-      createdAt: sceneData.createdAt || new Date().toISOString(),
-      prompt: sceneData.prompt,
-      isLatest: true
-    }];
+  // If no versions exist but there's a legacy video/music, create one version from it
+  if (videoVersions.length === 0) {
+    if (sceneId === 'music' && sceneData?.prompt?.audio_url) {
+      allVersions = [{
+        id: 'legacy',
+        version: 1,
+        createdAt: sceneData.createdAt || new Date().toISOString(),
+        prompt: sceneData.prompt,
+        isLatest: true
+      }];
+    } else if (sceneData?.prompt?.video_url) {
+      allVersions = [{
+        id: 'legacy',
+        version: 1,
+        createdAt: sceneData.createdAt || new Date().toISOString(),
+        prompt: sceneData.prompt,
+        isLatest: true
+      }];
+    }
   }
   
-  const videosWithUrls = allVersions.filter(v => v.prompt?.video_url);
+  const videosWithUrls = sceneId === 'music' 
+    ? allVersions.filter(v => (v.prompt?.audio_url || v.musicFile) || v.isLoading)
+    : allVersions.filter(v => v.prompt?.video_url || v.isLoading);
+    
+    
   
-  // Add upload card to the list if needed
+  // Add upload card or stored image card to the list if needed
   const totalCards = [...videosWithUrls];
   if (showUploadCard) {
     totalCards.push({
@@ -75,7 +105,28 @@ export const VideoVersionViewer = ({
       version: allVersions.length + 1,
       isUploadCard: true
     });
-  } else {
+  } else if (storedImageData?.url && videosWithUrls.length === 0 && sceneId === 'cover') {
+    // Show stored image for cover pages only when no videos exist
+    totalCards.push({
+      id: 'stored-image',
+      version: 1,
+      isStoredImageCard: true,
+      storedImage: storedImageData
+    });
+  } else if (sceneId === 'end' && videosWithUrls.length === 0 && !showUploadCard) {
+    // Show end scene generation card when no videos exist
+    totalCards.push({
+      id: 'end-scene',
+      version: 1,
+      isEndSceneCard: true
+    });
+  } else if (sceneId === 'music' && videosWithUrls.length === 0 && !showUploadCard) {
+    // Show music generation card when no music exists
+    totalCards.push({
+      id: 'music-scene',
+      version: 1,
+      isMusicCard: true
+    });
   }
   
   // Upload handlers
@@ -268,7 +319,6 @@ export const VideoVersionViewer = ({
               {onGenerate && (
                 <button
                   onClick={() => {
-                    console.log('Regenerate button clicked, calling onGenerate');
                     onGenerate();
                   }}
                   disabled={isUploading}
@@ -377,15 +427,272 @@ export const VideoVersionViewer = ({
       );
     }
     
-    // Completed video card
-    // Use stored image as immediate thumbnail if available (Firebase Storage URL or base64)
-    let thumbnailSrc = card.prompt?.cover_url || '';
-    if (storedImageData?.url) {
-      // Use Firebase Storage URL if available
-      thumbnailSrc = storedImageData.url;
-    } else if (storedImageData?.base64) {
-      // Fallback to base64 for backward compatibility
-      thumbnailSrc = `data:image/jpeg;base64,${storedImageData.base64}`;
+    // Music scene card (text-to-audio generation)
+    if (card.isMusicCard) {
+      // Show loading animation when generating music
+      if (isUploading) {
+        const displayMessage = uploadLoadingMessage;
+        // Extract progress percentage from message
+        let progressPercentage = 0;
+        const progressMatch = displayMessage.match(/(\d+)%/);
+        if (progressMatch) {
+          progressPercentage = parseInt(progressMatch[1]);
+        }
+        
+        return (
+          <div 
+            key={card.id}
+            className={`bg-gray-900 border border-gray-700 rounded-xl overflow-hidden ${aspectRatioClass}`}
+          >
+            <div className="relative w-full h-full">
+              <div className="w-full h-full bg-gradient-to-br from-green-900/20 to-blue-900/20 flex items-center justify-center">
+                <div className="text-center text-white opacity-30">
+                  <div className="text-4xl mb-2">🎵</div>
+                  <div className="text-lg font-bold mb-2">Background Music</div>
+                  <div className="text-sm">Creating audio...</div>
+                </div>
+              </div>
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+                <Loader2 className="animate-spin mb-2 text-green-400" size={24} />
+                <p className="text-white font-medium text-sm text-center leading-tight">{displayMessage}</p>
+              </div>
+              
+              {/* Progress line at bottom */}
+              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700">
+                <div 
+                  className="h-1 bg-gradient-to-r from-green-500 to-green-400 transition-all duration-1000 ease-out"
+                  style={{ width: `${progressPercentage}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      }
+      
+      // Normal state - show music generation card
+      return (
+        <div key={card.id}>
+          <div
+            className={`
+              relative bg-gradient-to-br from-green-900/20 to-blue-900/20 border-2 border-dashed border-green-500/30 rounded-xl overflow-hidden transition-all duration-300 w-full
+              hover:from-green-900/30 hover:to-blue-900/30 hover:border-green-400/50
+              ${aspectRatioClass}
+            `}
+            style={{ minHeight: '120px' }}
+          >
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <div className="text-6xl mb-3 text-green-400/60">🎵</div>
+              <h3 className="text-lg font-semibold text-green-300 mb-1">Background Music</h3>
+              <p className="text-gray-400 text-center text-sm px-4">Generate music to accompany your story</p>
+            </div>
+            
+            {/* Version badge */}
+            <div className="absolute top-2 left-2">
+              <span className="bg-green-500 text-white px-2 py-1 text-xs font-medium rounded-full">
+                v{card.version}
+              </span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
+    // Stored image card (for cover pages with Firebase Storage images)
+    if (card.isStoredImageCard) {
+      // Show loading animation when generating video
+      if (isUploading) {
+        const displayMessage = uploadLoadingMessage;
+        // Extract progress percentage from message
+        let progressPercentage = 0;
+        const progressMatch = displayMessage.match(/(\d+)%/);
+        if (progressMatch) {
+          progressPercentage = parseInt(progressMatch[1]);
+        }
+        
+        return (
+          <div 
+            key={card.id}
+            className={`bg-gray-900 border border-gray-700 rounded-xl overflow-hidden ${aspectRatioClass}`}
+          >
+            <div className="relative w-full h-full">
+              <img 
+                src={card.storedImage.url} 
+                alt="Processing cover" 
+                className="w-full h-full object-cover opacity-50" 
+              />
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+                <Loader2 className="animate-spin mb-2 text-blue-400" size={24} />
+                <p className="text-white font-medium text-sm text-center leading-tight">{displayMessage}</p>
+              </div>
+              
+              {/* Progress line at bottom */}
+              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700">
+                <div 
+                  className="h-1 bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-1000 ease-out"
+                  style={{ width: `${progressPercentage}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      }
+      
+      // Normal state - show stored image with generate button
+      return (
+        <div key={card.id} className="space-y-4">
+          <div
+            className={`
+              relative bg-gray-900 rounded-xl overflow-hidden transition-all duration-300 w-full
+              border-2 border-solid border-gray-600 hover:border-gray-500 cursor-pointer
+              ${aspectRatioClass}
+            `}
+            onClick={onGenerate}
+            style={{ minHeight: '120px' }}
+          >
+            <img 
+              src={card.storedImage.url}
+              alt="Cover image"
+              className="w-full h-full object-cover"
+            />
+            {/* Version badge */}
+            <div className="absolute top-2 left-2">
+              <span className="bg-blue-500 text-white px-2 py-1 text-xs font-medium rounded-full">
+                Cover Ready
+              </span>
+            </div>
+          </div>
+          
+        </div>
+      );
+    }
+    
+    // Loading video card (during generation)
+    if (card.isLoading) {
+      const displayMessage = uploadLoadingMessage || 'Generating video...';
+      // Extract progress percentage from message
+      let progressPercentage = 0;
+      const progressMatch = displayMessage.match(/(\d+)%/);
+      if (progressMatch) {
+        progressPercentage = parseInt(progressMatch[1]);
+      }
+      
+      return (
+        <div 
+          key={card.id}
+          className={`bg-gray-900 border border-gray-700 rounded-xl overflow-hidden ${aspectRatioClass}`}
+        >
+          <div className="relative w-full h-full">
+            {uploadImageBase64 && (
+              <img 
+                src={`data:image/jpeg;base64,${uploadImageBase64}`} 
+                alt="Processing" 
+                className="w-full h-full object-cover opacity-50" 
+              />
+            )}
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+              <Loader2 className="animate-spin mb-2 text-blue-400" size={24} />
+              <p className="text-white font-medium text-sm text-center leading-tight">{displayMessage}</p>
+            </div>
+            
+            {/* Progress line at bottom */}
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700">
+              <div 
+                className="h-1 bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-1000 ease-out"
+                style={{ width: `${progressPercentage}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
+    // End scene card (text-to-video generation)
+    if (card.isEndSceneCard) {
+      // Show loading animation when generating video
+      if (isUploading) {
+        const displayMessage = uploadLoadingMessage;
+        // Extract progress percentage from message
+        let progressPercentage = 0;
+        const progressMatch = displayMessage.match(/(\d+)%/);
+        if (progressMatch) {
+          progressPercentage = parseInt(progressMatch[1]);
+        }
+        
+        return (
+          <div 
+            key={card.id}
+            className={`bg-gray-900 border border-gray-700 rounded-xl overflow-hidden ${aspectRatioClass}`}
+          >
+            <div className="relative w-full h-full">
+              <div className="w-full h-full bg-gradient-to-br from-purple-900/20 to-blue-900/20 flex items-center justify-center">
+                <div className="text-center text-white opacity-30">
+                  <div className="text-4xl font-bold mb-2">The End</div>
+                  <div className="text-sm">Creating final scene...</div>
+                </div>
+              </div>
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+                <Loader2 className="animate-spin mb-2 text-blue-400" size={24} />
+                <p className="text-white font-medium text-sm text-center leading-tight">{displayMessage}</p>
+              </div>
+              
+              {/* Progress line at bottom */}
+              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700">
+                <div 
+                  className="h-1 bg-gradient-to-r from-purple-500 to-blue-400 transition-all duration-1000 ease-out"
+                  style={{ width: `${progressPercentage}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      }
+      
+      // Normal state - show end scene generation card
+      return (
+        <div key={card.id}>
+          <div
+            className={`
+              relative bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-2 border-dashed border-purple-500/30 rounded-xl overflow-hidden transition-all duration-300 w-full
+              hover:from-purple-900/30 hover:to-blue-900/30 hover:border-purple-400/50
+              ${aspectRatioClass}
+            `}
+            style={{ minHeight: '120px' }}
+          >
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-6">
+              <div className="text-center text-white mb-4">
+                <div className="text-3xl font-bold mb-1 bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
+                  The End
+                </div>
+                <div className="text-sm text-gray-300">
+                  Text-to-video generation
+                </div>
+              </div>
+              
+              {/* End scene card - no generate button here, consistent with other pages */}
+            </div>
+            
+            {/* Version badge */}
+            <div className="absolute top-2 left-2">
+              <span className="bg-gradient-to-r from-purple-500 to-blue-500 text-white px-2 py-1 text-xs font-medium rounded-full">
+                End Scene
+              </span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
+    // Completed video/music card
+    const isMusic = sceneId === 'music' || card.musicFile;
+    
+    // For music cards, use music-specific thumbnail, otherwise use video thumbnail
+    let thumbnailSrc = '';
+    if (!isMusic) {
+      thumbnailSrc = card.prompt?.cover_url || '';
+      if (storedImageData?.url) {
+        // Use Firebase Storage URL
+        thumbnailSrc = storedImageData.url;
+      }
     }
     
     // Debug: Check if this card is selected
@@ -394,13 +701,13 @@ export const VideoVersionViewer = ({
     return (
       <div 
         key={card.id}
-        className={`bg-gray-900 rounded-xl overflow-hidden transition-all duration-200 cursor-pointer group ${aspectRatioClass} ${
+        className={`bg-gray-900 rounded-xl overflow-hidden transition-all duration-200 group ${aspectRatioClass} ${
           selectionMode 
             ? isSelected 
               ? 'border-2 border-blue-500 bg-blue-500/10 shadow-lg shadow-blue-500/20' 
               : 'border-2 border-gray-700 hover:border-blue-400'
             : 'border border-gray-700 hover:border-blue-500'
-        }`}
+        } cursor-pointer`}
         onClick={() => {
           if (selectionMode && onToggleVersionSelection) {
             onToggleVersionSelection(card.id);
@@ -410,28 +717,64 @@ export const VideoVersionViewer = ({
         }}
       >
         <div className="relative w-full h-full">
-          {/* Use image as thumbnail instead of video element */}
-          <img
-            className="w-full h-full bg-gray-800 object-cover"
-            src={thumbnailSrc}
-            alt="Video thumbnail"
-          />
-          
-          {/* Hidden video for modal playback */}
-          <video
-            className="hidden"
-            muted
-            preload="metadata"
-          >
-            <source src={card.prompt.video_url} type="video/mp4" />
-          </video>
-          
-          {/* Play button overlay - always visible but subtle */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="bg-black/30 backdrop-blur-sm rounded-full p-2 opacity-70 group-hover:opacity-100 group-hover:scale-110 transition-all duration-200">
-              <Play size={20} className="text-white fill-current ml-0.5" />
-            </div>
-          </div>
+          {isMusic ? (
+            /* Music card - show audio waveform and player */
+            <>
+              <div 
+                className="w-full h-full bg-gradient-to-br from-green-900/30 to-blue-900/20 flex flex-col items-center justify-center p-4 hover:opacity-80 transition-opacity"
+              >
+                {/* Show different messages based on music availability */}
+                {(card.prompt?.audio_url || card.musicFile?.url) ? (
+                  <div className="flex flex-col items-center text-center">
+                    <div className="bg-green-500/20 border border-green-400/30 rounded-lg px-6 py-4">
+                      <div className="text-green-300 font-medium text-lg">🎧 Music Ready</div>
+                      <div className="text-xs text-green-200 mt-2">Click to play music</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center text-center">
+                    <div className="text-5xl mb-3 text-green-400">🎵</div>
+                    <div className="text-lg font-semibold text-green-300 mb-2">Background Music</div>
+                    <div className="text-sm text-gray-400 text-center mb-3">
+                      {card.prompt?.duration ? `${card.prompt.duration}s` : '30s'} • {card.prompt?.format || 'MP3'}
+                    </div>
+                    <div className="bg-gray-500/20 border border-gray-400/30 rounded-lg px-4 py-2 mt-2">
+                      <div className="text-gray-300 font-medium">Generate Music</div>
+                      <div className="text-xs text-gray-400 mt-1">Click to generate background music</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* No hidden video for music cards */}
+            </>
+          ) : (
+            /* Video card - existing logic */
+            <>
+              {/* Use image as thumbnail instead of video element */}
+              <img
+                className="w-full h-full bg-gray-800 object-cover"
+                src={thumbnailSrc}
+                alt="Video thumbnail"
+              />
+              
+              {/* Hidden video for modal playback */}
+              <video
+                className="hidden"
+                muted
+                preload="metadata"
+              >
+                <source src={card.prompt.video_url} type="video/mp4" />
+              </video>
+              
+              {/* Play button overlay - always visible but subtle */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="bg-black/30 backdrop-blur-sm rounded-full p-2 opacity-70 group-hover:opacity-100 group-hover:scale-110 transition-all duration-200">
+                  <Play size={20} className="text-white fill-current ml-0.5" />
+                </div>
+              </div>
+            </>
+          )}
           
           {/* Hover overlay */}
           <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-200"></div>
@@ -474,7 +817,8 @@ export const VideoVersionViewer = ({
               <button
                 onClick={(e) => {
                   e.stopPropagation(); // Prevent card click
-                  handleDownloadVideo(card.prompt.video_url, sceneId, card.version);
+                  const mediaUrl = isMusic ? (card.musicFile?.url || card.prompt.audio_url) : card.prompt.video_url;
+                  handleDownloadMedia(mediaUrl, sceneId, card.version, isMusic);
                 }}
                 className="bg-blue-500/90 hover:bg-blue-500 text-white p-1.5 rounded-full transition-colors duration-200"
                 aria-label={`Download version ${card.version}`}
@@ -543,23 +887,44 @@ export const VideoVersionViewer = ({
               <X size={32} />
             </button>
             
-            {/* Video player */}
+            {/* Video/Audio player */}
             <div className="bg-gray-900 rounded-xl overflow-hidden shadow-2xl">
-              <video
-                className="w-full h-auto max-h-[70vh] bg-black"
-                controls
-                autoPlay
-                poster={storedImageData?.url 
-                  ? storedImageData.url
-                  : storedImageData?.base64 
-                    ? `data:image/jpeg;base64,${storedImageData.base64}` 
-                    : selectedVideo.prompt?.cover_url || ''}
-              >
-                <source src={selectedVideo.prompt.video_url} type="video/mp4" />
-                Your browser does not support the video tag.
-              </video>
+              {sceneId === 'music' || selectedVideo.musicFile ? (
+                /* Audio player for music */
+                <>
+                  <div className="p-8 text-center bg-gradient-to-br from-green-900/30 to-blue-900/20">
+                    <div className="mb-6">
+                      <div className="text-6xl mb-4 text-green-400">🎵</div>
+                      <h3 className="text-xl font-semibold text-green-300 mb-2">Background Music</h3>
+                      <p className="text-gray-400">
+                        {selectedVideo.prompt?.duration ? `${selectedVideo.prompt.duration}s` : '30s'} • 
+                        {selectedVideo.prompt?.format || 'MP3'}
+                      </p>
+                    </div>
+                    <audio
+                      className="w-full max-w-md mx-auto mt-4"
+                      controls
+                      autoPlay
+                      src={selectedVideo.musicFile?.url || selectedVideo.prompt.audio_url}
+                    >
+                      Your browser does not support the audio element.
+                    </audio>
+                  </div>
+                </>
+              ) : (
+                /* Video player for video scenes */
+                <video
+                  className="w-full h-auto max-h-[70vh] bg-black"
+                  controls
+                  autoPlay
+                  poster={storedImageData?.url || selectedVideo.prompt?.cover_url || ''}
+                >
+                  <source src={selectedVideo.prompt.video_url} type="video/mp4" />
+                  Your browser does not support the video tag.
+                </video>
+              )}
               
-              {/* Video info bar */}
+              {/* Video/Music info bar */}
               <div className="p-4 bg-gray-800 border-t border-gray-700">
                 <div className="flex items-center justify-between">
                   <div>
@@ -575,7 +940,9 @@ export const VideoVersionViewer = ({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDownloadVideo(selectedVideo.prompt.video_url, sceneId, selectedVideo.version);
+                        const isModalMusic = sceneId === 'music' || selectedVideo.musicFile;
+                        const mediaUrl = isModalMusic ? (selectedVideo.musicFile?.url || selectedVideo.prompt.audio_url) : selectedVideo.prompt.video_url;
+                        handleDownloadMedia(mediaUrl, sceneId, selectedVideo.version, isModalMusic);
                       }}
                       className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full transition-colors duration-200"
                       aria-label={`Download version ${selectedVideo.version}`}

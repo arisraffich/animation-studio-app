@@ -12,6 +12,65 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 8081;
 const fs = require('fs');
 
+// Progress storage for smooth progress bars
+const progressStorage = new Map();
+const progressTimers = new Map(); // Track incremental progress timers
+
+const getStoredProgress = (generationId) => {
+  return progressStorage.get(generationId) || 0;
+};
+
+const storeProgress = (generationId, progress) => {
+  progressStorage.set(generationId, progress);
+  // Clean up old entries after 30 minutes
+  setTimeout(() => {
+    progressStorage.delete(generationId);
+    // Also clean up any running timer
+    const timer = progressTimers.get(generationId);
+    if (timer) {
+      clearInterval(timer);
+      progressTimers.delete(generationId);
+    }
+  }, 30 * 60 * 1000);
+};
+
+// Start incremental progress for long-running states
+const startIncrementalProgress = (generationId, startProgress, endProgress, duration = 300000) => {
+  // Clear any existing timer
+  const existingTimer = progressTimers.get(generationId);
+  if (existingTimer) {
+    clearInterval(existingTimer);
+  }
+  
+  const increment = (endProgress - startProgress) / (duration / 10000); // Update every 10 seconds
+  let currentProgress = startProgress;
+  
+  const timer = setInterval(() => {
+    const currentStoredProgress = getStoredProgress(generationId);
+    
+    // Only increment if we haven't moved beyond this range (i.e., still processing)
+    if (currentStoredProgress < endProgress) {
+      // Use faster increments - 2-3% every 7 seconds instead of 1% every 10 seconds
+      currentProgress += Math.ceil(increment * 2.5);
+      currentProgress = Math.min(currentProgress, endProgress - 1); // Cap before end
+      
+      storeProgress(generationId, Math.round(currentProgress));
+      broadcastProgress(generationId, { 
+        stage: 'processing', 
+        progress: Math.round(currentProgress), 
+        message: 'Generating video...',
+        incremental: true 
+      });
+    } else {
+      // We've moved beyond this state, stop incrementing
+      clearInterval(timer);
+      progressTimers.delete(generationId);
+    }
+  }, 7000); // Update every 7 seconds for faster feel
+  
+  progressTimers.set(generationId, timer);
+};
+
 // Increase the body size limit to 50MB (adjust as needed)
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -121,6 +180,7 @@ app.post('/api/seedance/create', async (req, res) => {
     
     // Send initial progress
     if (generationId) {
+      storeProgress(generationId, 10);
       broadcastProgress(generationId, { 
         stage: 'creating', 
         progress: 10, 
@@ -163,6 +223,7 @@ app.post('/api/seedance/create', async (req, res) => {
     
     // Send progress update for successful creation
     if (generationId) {
+      storeProgress(generationId, 25);
       broadcastProgress(generationId, { 
         stage: 'processing', 
         progress: 25, 
@@ -218,29 +279,59 @@ app.get('/api/seedance/status/:predictionId', async (req, res) => {
 
     const data = await response.json();
     
-    // Send progress updates via WebSocket
+    // Send progress updates via WebSocket with smooth progression
     if (generationId && data.status) {
       let progress = 25;
       let message = 'Processing video...';
       
+      // Get stored progress to prevent backwards movement
+      const currentProgress = getStoredProgress(generationId);
+      
       switch (data.status) {
         case 'starting':
-          progress = 30;
-          message = 'Initializing video generation...';
+          // Only set to 35% if we haven't progressed further
+          progress = Math.max(currentProgress, 35);
           break;
         case 'processing':
-          progress = 60;
-          message = 'Generating video frames...';
+          // Only set to 65% if we haven't progressed further
+          progress = Math.max(currentProgress, 65);
+          
+          // Start incremental progress from current position to 98% over ~3 minutes
+          if (currentProgress < 95) {
+            startIncrementalProgress(generationId, Math.max(currentProgress, 65), 98, 180000);
+          }
           break;
         case 'succeeded':
           progress = 100;
-          message = 'Video generation complete!';
+          
+          // Stop any incremental progress timer
+          const timer = progressTimers.get(generationId);
+          if (timer) {
+            clearInterval(timer);
+            progressTimers.delete(generationId);
+          }
           break;
         case 'failed':
           progress = 0;
-          message = 'Video generation failed';
+          
+          // Stop any incremental progress timer
+          const failTimer = progressTimers.get(generationId);
+          if (failTimer) {
+            clearInterval(failTimer);
+            progressTimers.delete(generationId);
+          }
+          break;
+        default:
+          // Keep current progress for unknown states
+          progress = currentProgress;
           break;
       }
+      
+      // Unified message - let frontend handle the display message
+      message = progress >= 100 ? 'Video generation complete!' : 'Generating video...';
+      
+      // Store the progress to prevent regression
+      storeProgress(generationId, progress);
       
       broadcastProgress(generationId, { 
         stage: data.status, 
@@ -260,6 +351,161 @@ app.get('/api/seedance/status/:predictionId', async (req, res) => {
   }
 });
 
+
+// MusicGen API endpoints
+app.post('/api/replicate/musicgen', async (req, res) => {
+  console.log('🎵 MusicGen endpoint called:', req.body);
+  
+  if (!process.env.REPLICATE_API_TOKEN) {
+    console.error('❌ REPLICATE_API_TOKEN not set');
+    return res.status(500).json({ error: 'Replicate API token not configured' });
+  }
+
+  try {
+    const generationId = req.body.generationId; // Client should provide this
+    
+    // Send initial progress
+    if (generationId) {
+      storeProgress(generationId, 10);
+      broadcastProgress(generationId, { 
+        stage: 'creating', 
+        progress: 10, 
+        message: 'Starting music generation...' 
+      });
+    }
+    
+    const response = await fetch('https://api.replicate.com/v1/predictions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Token ${process.env.REPLICATE_API_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        version: "671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb",
+        input: req.body.input
+      })
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error('MusicGen API Error:', errorBody);
+      
+      if (generationId) {
+        broadcastProgress(generationId, { 
+          stage: 'error', 
+          progress: 0, 
+          message: 'Music generation failed',
+          error: errorBody
+        });
+      }
+      
+      return res.status(response.status).json({ 
+        error: 'MusicGen API Error', 
+        details: errorBody 
+      });
+    }
+
+    const data = await response.json();
+    
+    // Send progress update for successful creation
+    if (generationId) {
+      storeProgress(generationId, 20);
+      broadcastProgress(generationId, { 
+        stage: 'processing', 
+        progress: 20, 
+        message: 'Music generation in progress...' 
+      });
+    }
+    
+    res.json(data);
+    
+  } catch (error) {
+    console.error('Error in MusicGen proxy:', error);
+    
+    const generationId = req.body.generationId;
+    if (generationId) {
+      broadcastProgress(generationId, { 
+        stage: 'error', 
+        progress: 0, 
+        message: 'Music generation failed',
+        error: error.message
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Internal server error', 
+      details: error.message 
+    });
+  }
+});
+
+// Download proxy endpoint for Firebase Storage files
+app.get('/api/download/:type/:filename', async (req, res) => {
+  console.log('📥 Download endpoint hit:', req.params, req.query);
+  
+  try {
+    const { type, filename } = req.params;
+    const { url } = req.query;
+    
+    console.log(`📥 Parameters - type: ${type}, filename: ${filename}, url: ${url}`);
+    
+    if (!url) {
+      console.error('❌ No URL parameter provided');
+      return res.status(400).json({ error: 'URL parameter required' });
+    }
+    
+    // Decode URL properly and validate
+    let decodedUrl;
+    try {
+      decodedUrl = decodeURIComponent(url);
+      console.log(`📥 Decoded URL: ${decodedUrl}`);
+      
+      // Validate URL format
+      new URL(decodedUrl);
+    } catch (urlError) {
+      console.error('❌ Invalid URL format:', urlError.message);
+      return res.status(400).json({ error: 'Invalid URL format', details: urlError.message });
+    }
+    
+    console.log(`📥 Fetching from Firebase: ${decodedUrl}`);
+    
+    const response = await fetch(decodedUrl);
+    console.log(`📥 Firebase response status: ${response.status}`);
+    
+    if (!response.ok) {
+      console.error(`❌ Firebase fetch failed: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to fetch file: ${response.status}`);
+    }
+    
+    const contentLength = response.headers.get('content-length');
+    const contentType = response.headers.get('content-type') || (type === 'music' ? 'audio/mpeg' : 'video/mp4');
+    const extension = type === 'music' ? 'mp3' : 'mp4';
+    
+    console.log(`📥 File info: ${contentLength} bytes, type: ${contentType}`);
+    
+    // Set proper download headers
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.${extension}"`);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    if (contentLength) {
+      res.setHeader('Content-Length', contentLength);
+    }
+    
+    console.log('📥 Converting to buffer...');
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    
+    console.log(`📥 Sending ${buffer.length} bytes to browser`);
+    res.send(buffer);
+    console.log('✅ Download completed successfully');
+    
+  } catch (error) {
+    console.error('❌ Download proxy error:', error.message);
+    console.error('❌ Full error:', error);
+    res.status(500).json({ error: 'Download failed', details: error.message });
+  }
+});
 
 // Firebase Storage image proxy to avoid CORS issues
 app.post('/api/firebase-image', async (req, res) => {
