@@ -112,3 +112,17 @@ export const Download = ({ className, size = 24 }) => (
     <line x1="12" y1="15" x2="12" y2="3"></line>
   </svg>
 );
+
+export const Plus = ({ className, size = 24 }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M5 12h14"></path>
+    <path d="M12 5v14"></path>
+  </svg>
+);
+
+export const Pencil = ({ className, size = 24 }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="m18 2 4 4-14 14H4v-4L18 2z"></path>
+    <path d="M14.5 5.5 18.5 9.5"></path>
+  </svg>
+);

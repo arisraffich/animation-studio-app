@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { VideoVersionViewer } from './VideoVersionViewer';
 import { ConfirmationModal } from '../common/ConfirmationModal';
-import { generateScene, generateVideoWithSeedance, generateSeedancePrompt, createSeedanceTask, pollSeedanceTask, generateMusicWithElevenLabs } from '../../services/api';
+import { generateScene, generateVideoWithSeedance, generateSeedancePrompt, createSeedanceTask, pollSeedanceTask, generateMusicWithElevenLabs, getSeedanceAspectRatio } from '../../services/api';
+import { Pencil, Plus, X, Check } from '../common/Icons';
 import { uploadImageFromBase64, deleteVersionImage, uploadMusicFromBlob, deleteVersionMusic } from '../../services/storageService';
 import { websocketService } from '../../services/websocketService';
 import { getProject } from '../../services/firebaseService';
@@ -31,7 +32,15 @@ export const ProgressiveVideoGrid = ({
   
   // Comment system state
   const [selectedComments, setSelectedComments] = useState(new Set());
-  const [newCommentText, setNewCommentText] = useState('');
+  
+  // Unified workspace editing state
+  const [isEditingOriginalText, setIsEditingOriginalText] = useState(false);
+  const [editedOriginalText, setEditedOriginalText] = useState('');
+  const [isAddingNewNote, setIsAddingNewNote] = useState(false);
+  const [newNoteText, setNewNoteText] = useState('');
+  const [isEditingPrompt, setIsEditingPrompt] = useState(false);
+  const [editedPrompt, setEditedPrompt] = useState('');
+  const [originalPrompt, setOriginalPrompt] = useState(''); // Store original for restore
   
   // Get available comments from previous versions
   const getAvailableComments = () => {
@@ -52,25 +61,42 @@ export const ProgressiveVideoGrid = ({
     return comments;
   };
   
-  // Calculate final text for generation
+  // Calculate final text for generation with unified workspace support
   const calculateFinalText = () => {
-    const originalText = sceneData?.videoVersions?.[0]?.originalText || editableSceneText;
+    // Use edited text if in edit mode, otherwise use stored/scene text
+    const originalText = isEditingOriginalText 
+      ? editedOriginalText 
+      : (sceneData?.videoVersions?.[0]?.originalText || editableSceneText);
+    
     const comments = getAvailableComments();
     const selectedCommentTexts = comments
       .filter(comment => selectedComments.has(comment.id))
       .map(comment => comment.text);
     
-    if (newCommentText.trim()) {
-      selectedCommentTexts.push(newCommentText.trim());
+    // Add new note if exists
+    if (newNoteText.trim()) {
+      selectedCommentTexts.push(newNoteText.trim());
     }
     
     return {
       originalText,
       animationNotes: selectedCommentTexts.join('. '),
+      selectedPreviousNotes: comments.filter(comment => selectedComments.has(comment.id)),
+      newNote: newNoteText.trim(),
       finalText: selectedCommentTexts.length > 0 
         ? `${originalText}. ${selectedCommentTexts.join('. ')}`
         : originalText
     };
+  };
+  
+  // Get the current prompt text, cleaned of prefixes
+  const getCurrentPrompt = () => {
+    const latestVersion = sceneData?.videoVersions?.find(v => v.isLatest);
+    if (latestVersion?.prompt?.prompt) {
+      // Remove "Seedance prompt:" prefix if present
+      return latestVersion.prompt.prompt.replace(/^Seedance prompt:\s*/i, '').trim();
+    }
+    return '';
   };
   
   // Bulk selection functions use props instead of local state
@@ -426,21 +452,63 @@ export const ProgressiveVideoGrid = ({
       if (sceneId !== 'end' && sceneId !== 'music') {
         promptPromise = (async () => {
           try {
-            // Use Seedance for all scenes including cover
-            return await generateVideoWithSeedance(
-              projectWithEditedText, 
-              sceneId, 
-              imageToUse, 
-              '', // No feedback
-              setError, 
-              setLoadingMessage, 
-              { 
-                imageDimensions: dimensionsToUse, 
-                textData,
-                generationId: currentGenerationId,
-                websocketCallback: handleWebSocketProgress
+            // Check if user has edited the prompt
+            if (editedPrompt.trim()) {
+              // Use custom prompt - create task directly with user's prompt
+              const predictionId = await createSeedanceTask(
+                imageToUse,
+                editedPrompt.trim(),
+                dimensionsToUse,
+                setError,
+                currentGenerationId,
+                5
+              );
+              
+              // Poll for completion
+              let attempts = 0;
+              const maxAttempts = 60;
+              
+              while (attempts < maxAttempts) {
+                const prediction = await pollSeedanceTask(predictionId, setError, currentGenerationId);
+                
+                if (prediction.status === 'succeeded' && prediction.output) {
+                  return {
+                    prompt: editedPrompt.trim(),
+                    video_url: prediction.output,
+                    prediction_id: predictionId,
+                    model: 'seedance-custom',
+                    aspect_ratio: dimensionsToUse ? getSeedanceAspectRatio(dimensionsToUse.width, dimensionsToUse.height) : '16:9',
+                    resolution: '1080p',
+                    duration: 5
+                  };
+                } else if (prediction.status === 'failed') {
+                  throw new Error(`Custom prompt generation failed: ${prediction.error || 'Unknown error'}`);
+                } else if (prediction.status === 'canceled') {
+                  throw new Error('Custom prompt generation was canceled');
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 10000));
+                attempts++;
               }
-            );
+              
+              throw new Error('Custom prompt generation timed out after 10 minutes');
+            } else {
+              // Use Seedance for all scenes including cover with GPT-5 generated prompts
+              return await generateVideoWithSeedance(
+                projectWithEditedText, 
+                sceneId, 
+                imageToUse, 
+                '', // No feedback
+                setError, 
+                setLoadingMessage, 
+                { 
+                  imageDimensions: dimensionsToUse, 
+                  textData,
+                  generationId: currentGenerationId,
+                  websocketCallback: handleWebSocketProgress
+                }
+              );
+            }
           } catch (error) {
             // If video generation fails, fall back to JSON only
             setError(`Video generation failed: ${error.message}. Generated prompt without video.`);
@@ -613,7 +681,7 @@ export const ProgressiveVideoGrid = ({
         isLatest: true,
         // Comment system fields
         originalText: existingVersions.length === 0 ? textData.originalText : existingVersions[0].originalText,
-        commentText: newCommentText.trim(), // Store the new comment for this version
+        commentText: newNoteText.trim(), // Store the new note from unified workspace
         finalText: textData.finalText,
         // Music file data for music scenes
         ...(sceneId === 'music' && finalMusicFileData ? {
@@ -668,7 +736,15 @@ export const ProgressiveVideoGrid = ({
       setUploadImageBase64('');
       setImageDimensions(null);
       setSelectedComments(new Set());
-      setNewCommentText('');
+      
+      // Reset unified workspace state
+      setIsEditingOriginalText(false);
+      setEditedOriginalText('');
+      setIsAddingNewNote(false);
+      setNewNoteText('');
+      setIsEditingPrompt(false);
+      setEditedPrompt('');
+      setOriginalPrompt('');
       
       websocketService.unsubscribe(currentGenerationId);
       setGenerationId(null);
@@ -1022,122 +1098,203 @@ export const ProgressiveVideoGrid = ({
         />
       </div>
 
-      {/* Always show page label and scene text */}
-      <div className="space-y-4">
-        {/* Page label - always visible */}
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold text-blue-400 bg-blue-400/10 px-3 py-1 rounded-full border border-blue-400/20">
-            {sceneId === 'cover' ? 'Cover' : sceneId === 'end' ? 'End Scene' : sceneId === 'music' ? 'Music' : `Page ${sceneId}`}
-          </span>
-          <span className="font-medium text-gray-300">{sceneId === 'music' ? 'Music Prompt' : 'Scene Text'}</span>
-        </div>
-        
-        {/* Scene text - always visible */}
-        <div>
-          <textarea
-            id="scene-text"
-            value={editableSceneText}
-            onChange={(e) => setEditableSceneText(e.target.value)}
-            placeholder="Enter the scene text for video generation..."
-            className="w-full h-24 p-4 bg-gray-900 border border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition text-gray-300 resize-none"
-            readOnly={!isRegenerating && hasExistingVideos}
-          />
-        </div>
-      </div>
 
       {/* Comment System UI when regenerating or first time */}
       {(isRegenerating || (!hasExistingVideos && !legacyVideo)) && (
         <div className="space-y-6">
-          {/* Generate button for first time */}
-          {!isRegenerating && (
-            <div className="pt-2">
-              <button
-                onClick={handleGenerate}
-                disabled={isUploading || (sceneId !== 'end' && sceneId !== 'music' && !uploadImageBase64 && !hasStoredImage)}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-medium transition-colors duration-200"
-              >
-                {sceneId === 'music' ? 'Generate Music' : 'Generate Video'}
-              </button>
-            </div>
-          )}
+          {/* Generate button removed - only using the one below image thumbnail */}
 
           {/* Regeneration - Comment System */}
           {isRegenerating && (
             <div className="space-y-4">
-              {/* Animation Notes section header */}
-              <div className="pt-2">
-                <span className="font-medium text-gray-300">Animation Notes</span>
-              </div>
               
-              {/* New Comment Input */}
+              {/* Unified Text Workspace */}
               <div>
-                <label htmlFor="new-comment" className="block mb-3 font-medium text-gray-300">
-                  New Animation Notes
+                <label className="block mb-3">
+                  <span className="font-medium text-gray-300">Generation Preview</span>
                 </label>
-                <textarea
-                  id="new-comment"
-                  value={newCommentText}
-                  onChange={(e) => setNewCommentText(e.target.value)}
-                  placeholder="Add specific animation directions..."
-                  className="w-full h-20 p-4 bg-gray-900 border border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition text-gray-300 resize-none"
-                />
-              </div>
-
-              {/* Live Preview */}
-              <div>
-                <label className="block mb-3 font-medium text-gray-300">
-                  Generation Preview
-                </label>
-                <div className="p-4 bg-gray-800 rounded-xl border border-gray-600">
-                  <div className="text-sm text-gray-400 mb-2">Scene text:</div>
-                  <div className="text-gray-300 mb-3">"{calculateFinalText().originalText}"</div>
+                
+                <div className="bg-gray-800 rounded-xl border border-gray-600 space-y-0 max-h-[calc(100vh-200px)] overflow-y-auto">
                   
-                  {calculateFinalText().animationNotes && (
+                  {/* Video Prompt Section */}
+                  {getCurrentPrompt() && (
                     <>
-                      <div className="text-sm text-gray-400 mb-2">Animation notes:</div>
-                      <div className="text-blue-300">{calculateFinalText().animationNotes}</div>
+                      <div className="p-4 border-b border-gray-600">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="text-sm text-gray-400">Video Prompt</div>
+                          <button
+                            onClick={() => {
+                              setIsEditingPrompt(!isEditingPrompt);
+                              if (!isEditingPrompt) {
+                                const currentPrompt = getCurrentPrompt();
+                                setEditedPrompt(currentPrompt);
+                                setOriginalPrompt(currentPrompt);
+                              }
+                            }}
+                            className="flex items-center gap-1 text-xs text-gray-500 hover:text-orange-400 transition-colors"
+                          >
+                            <Pencil size={12} />
+                            {isEditingPrompt ? 'Save' : 'Edit'}
+                          </button>
+                        </div>
+                        
+                        {isEditingPrompt ? (
+                          <textarea
+                            value={editedPrompt}
+                            onChange={(e) => setEditedPrompt(e.target.value)}
+                            onBlur={() => {
+                              // If cleared, restore original
+                              if (!editedPrompt.trim()) {
+                                setEditedPrompt(originalPrompt);
+                              }
+                            }}
+                            className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition text-gray-300 resize-none"
+                            rows={3}
+                            placeholder="Edit video prompt..."
+                          />
+                        ) : (
+                          <div className="text-gray-300 p-3 bg-gray-700 rounded-lg text-sm">
+                            {getCurrentPrompt()}
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
+                  
+                  {/* Scene Text Preview/Edit */}
+                  <div className="p-4 border-b border-gray-600">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="text-sm text-gray-400">Scene Text</div>
+                      <button
+                        onClick={() => {
+                          setIsEditingOriginalText(!isEditingOriginalText);
+                          if (!isEditingOriginalText) {
+                            setEditedOriginalText(calculateFinalText().originalText);
+                          }
+                        }}
+                        className="flex items-center gap-1 text-xs text-gray-500 hover:text-orange-400 transition-colors"
+                      >
+                        <Pencil size={12} />
+                        {isEditingOriginalText ? 'Save' : 'Edit'}
+                      </button>
+                    </div>
+                    
+                    {isEditingOriginalText ? (
+                      <textarea
+                        value={editedOriginalText}
+                        onChange={(e) => setEditedOriginalText(e.target.value)}
+                        className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition text-gray-300 resize-none"
+                        rows={3}
+                        placeholder="Edit scene text..."
+                      />
+                    ) : (
+                      <>
+                        {/* Final Preview with Scene Text */}
+                        <div className="text-gray-300 mb-3 p-3 bg-gray-700 rounded-lg">
+                          "{calculateFinalText().originalText}"
+                        </div>
+                        
+                        {/* Selected Previous Notes */}
+                        {calculateFinalText().selectedPreviousNotes.map((note) => (
+                          <div key={note.id} className="text-blue-300 text-sm mb-2 border-l-2 border-blue-500 pl-3 ml-2">
+                            + {note.text}
+                          </div>
+                        ))}
+                        
+                        {/* New Note Preview */}
+                        {calculateFinalText().newNote && (
+                          <div className="text-emerald-300 text-sm mb-2 border-l-2 border-emerald-500 pl-3 ml-2">
+                            + {calculateFinalText().newNote}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  
+                  {/* Previous Notes Checkboxes */}
+                  {getAvailableComments().length > 0 && (
+                    <div className="p-4 border-b border-gray-600">
+                      <div className="text-sm text-gray-400 mb-2">Previous notes:</div>
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {getAvailableComments().map((comment) => (
+                          <label
+                            key={comment.id}
+                            className="flex items-center p-2 rounded-lg hover:bg-gray-700 transition-colors cursor-pointer"
+                          >
+                            <span className="text-gray-500 text-xs font-medium min-w-[24px]">
+                              v{comment.version}
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={selectedComments.has(comment.id)}
+                              onChange={(e) => {
+                                const newSelected = new Set(selectedComments);
+                                if (e.target.checked) {
+                                  newSelected.add(comment.id);
+                                } else {
+                                  newSelected.delete(comment.id);
+                                }
+                                setSelectedComments(newSelected);
+                              }}
+                              className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-2 focus:ring-blue-500 mr-2"
+                            />
+                            <div className="flex-1 text-gray-300 text-sm">
+                              {comment.text}
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Add New Note Section */}
+                  <div className="p-4">
+                    {isAddingNewNote ? (
+                      <div className="space-y-3">
+                        <textarea
+                          value={newNoteText}
+                          onChange={(e) => setNewNoteText(e.target.value)}
+                          className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none transition text-gray-300 resize-none"
+                          rows={2}
+                          placeholder="Add new animation note..."
+                          autoFocus
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setIsAddingNewNote(false);
+                              // Keep the note text to show in preview
+                            }}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg transition-colors"
+                          >
+                            <Check size={14} />
+                            Done
+                          </button>
+                          <button
+                            onClick={() => {
+                              setIsAddingNewNote(false);
+                              setNewNoteText('');
+                            }}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg transition-colors"
+                          >
+                            <X size={14} />
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setIsAddingNewNote(true)}
+                        className="flex items-center gap-2 text-sm text-gray-400 hover:text-emerald-400 transition-colors"
+                      >
+                        <Plus size={16} />
+                        {newNoteText.trim() ? 'Edit animation note' : 'Add animation note'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* Available Comments */}
-              {getAvailableComments().length > 0 && (
-                <div>
-                  <label className="block mb-3 font-medium text-gray-300">
-                    Previous Animation Notes
-                  </label>
-                  <div className="space-y-2">
-                    {getAvailableComments().map((comment) => (
-                      <label
-                        key={comment.id}
-                        className="flex items-start gap-3 p-3 bg-gray-800 rounded-lg hover:bg-gray-750 transition-colors cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedComments.has(comment.id)}
-                          onChange={(e) => {
-                            const newSelected = new Set(selectedComments);
-                            if (e.target.checked) {
-                              newSelected.add(comment.id);
-                            } else {
-                              newSelected.delete(comment.id);
-                            }
-                            setSelectedComments(newSelected);
-                          }}
-                          className="mt-1 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-2 focus:ring-blue-500"
-                        />
-                        <div className="flex-1">
-                          <div className="text-gray-300 text-sm">{comment.text}</div>
-                          <div className="text-gray-500 text-xs mt-1">
-                            From v{comment.version}
-                          </div>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 

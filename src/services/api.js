@@ -259,7 +259,7 @@ LENGTH REQUIREMENTS:
 };
 
 // Determine Seedance aspect ratio based on image dimensions
-const getSeedanceAspectRatio = (width, height) => {
+export const getSeedanceAspectRatio = (width, height) => {
   const aspectRatio = width / height;
   
   // Square (close to 1:1)

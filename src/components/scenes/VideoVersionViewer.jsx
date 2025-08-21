@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, X, Loader2, UploadCloud, Trash2, Download } from '../common/Icons';
+import { Play, X, Loader2, UploadCloud, Trash2, Download, RefreshCw } from '../common/Icons';
 import { Checkbox } from '../common/Checkbox';
 
 export const VideoVersionViewer = ({ 
@@ -346,7 +346,7 @@ export const VideoVersionViewer = ({
         <div key={card.id} className="space-y-4">
           <div
             className={`
-              relative bg-gray-900 rounded-xl cursor-pointer transition-all duration-300 w-full overflow-hidden
+              relative bg-gray-900 rounded-xl transition-all duration-300 w-full overflow-hidden group
               ${hasImage 
                 ? 'border-2 border-solid border-gray-600 hover:border-gray-500' 
                 : `border-2 border-dashed ${isDragOver 
@@ -360,7 +360,10 @@ export const VideoVersionViewer = ({
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onClick={() => !hasImage && handleClick(card)}
-            style={{ minHeight: '120px' }}
+            style={{ 
+              minHeight: '120px',
+              cursor: hasImage ? 'default' : 'pointer' // Only pointer cursor when no image uploaded
+            }}
           >
             {hasImage ? (
               // Show uploaded image thumbnail
@@ -370,6 +373,23 @@ export const VideoVersionViewer = ({
                   alt="Uploaded scene"
                   className="w-full h-full object-cover"
                 />
+                
+                {/* Replace Image Overlay - appears on hover */}
+                {!isUploadingToStorage && (
+                  <div className="absolute inset-0 bg-black/40 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fileInputRef.current?.click();
+                      }}
+                      className="bg-white/90 hover:bg-white text-gray-800 px-4 py-2 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2 shadow-lg"
+                    >
+                      <RefreshCw size={16} />
+                      Replace Image
+                    </button>
+                  </div>
+                )}
+                
                 {/* Upload to Storage progress overlay */}
                 {isUploadingToStorage && (
                   <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center">
@@ -396,18 +416,8 @@ export const VideoVersionViewer = ({
                   <p className={`font-medium transition-colors duration-300 ${
                     isDragOver ? 'text-blue-400' : 'text-gray-300'
                   }`}>
-                    {isDragOver ? 'Drop to upload' : 'Drop image here'}
+                    {isDragOver ? 'Drop to upload' : `Upload image for ${sceneId === 'cover' ? 'Cover' : sceneId === 'end' ? 'End Scene' : sceneId === 'music' ? 'Music' : `Page ${sceneId}`}`}
                   </p>
-                  <p className="text-gray-500 text-sm mt-1">
-                    or click to browse
-                  </p>
-                </div>
-                
-                {/* Version badge */}
-                <div className="absolute top-2 left-2">
-                  <span className="bg-gray-700 text-gray-300 px-2 py-1 text-xs font-medium rounded-full">
-                    v{card.version}
-                  </span>
                 </div>
               </>
             )}
@@ -420,7 +430,7 @@ export const VideoVersionViewer = ({
               disabled={isUploading}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200"
             >
-              {isUploading ? uploadLoadingMessage : (isRegenerating ? 'Regenerate' : 'Generate')}
+              {isUploading ? uploadLoadingMessage : (isRegenerating ? 'Regenerate' : 'Generate Video')}
             </button>
           )}
         </div>
@@ -582,9 +592,9 @@ export const VideoVersionViewer = ({
           className={`bg-gray-900 border border-gray-700 rounded-xl overflow-hidden ${aspectRatioClass}`}
         >
           <div className="relative w-full h-full">
-            {uploadImageBase64 && (
+            {(uploadImageBase64 || storedImageData?.url) && (
               <img 
-                src={`data:image/jpeg;base64,${uploadImageBase64}`} 
+                src={uploadImageBase64 ? `data:image/jpeg;base64,${uploadImageBase64}` : storedImageData.url} 
                 alt="Processing" 
                 className="w-full h-full object-cover opacity-50" 
               />
@@ -799,7 +809,14 @@ export const VideoVersionViewer = ({
               />
             </div>
           ) : (
-            <div className="absolute top-2 left-2">
+            <div className="absolute top-2 left-2 flex gap-2">
+              {/* Page badge - only show on first version (v1) */}
+              {card.version === 1 && (
+                <span className="bg-blue-500/80 text-white border border-blue-400/50 px-2 py-1 text-xs font-semibold rounded-full shadow-lg backdrop-blur-sm">
+                  {sceneId === 'cover' ? 'Cover' : sceneId === 'end' ? 'End Scene' : sceneId === 'music' ? 'Music' : `Pg ${sceneId}`}
+                </span>
+              )}
+              {/* Version badge */}
               <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                 card.isLatest 
                   ? 'bg-blue-500 text-white' 
