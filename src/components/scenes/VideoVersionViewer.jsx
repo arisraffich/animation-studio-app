@@ -479,9 +479,9 @@ export const VideoVersionViewer = ({
         );
       }
       
-      // Normal state - show music generation card
+      // Normal state - show music generation card with generate button
       return (
-        <div key={card.id}>
+        <div key={card.id} className="space-y-4">
           <div
             className={`
               relative bg-gradient-to-br from-green-900/20 to-blue-900/20 border-2 border-dashed border-green-500/30 rounded-xl overflow-hidden transition-all duration-300 w-full
@@ -503,6 +503,17 @@ export const VideoVersionViewer = ({
               </span>
             </div>
           </div>
+          
+          {/* Generate Music button */}
+          {onGenerate && (
+            <button
+              onClick={onGenerate}
+              disabled={isUploading}
+              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200"
+            >
+              {isUploading ? uploadLoadingMessage : 'Generate Music'}
+            </button>
+          )}
         </div>
       );
     }
@@ -553,10 +564,9 @@ export const VideoVersionViewer = ({
           <div
             className={`
               relative bg-gray-900 rounded-xl overflow-hidden transition-all duration-300 w-full
-              border-2 border-solid border-gray-600 hover:border-gray-500 cursor-pointer
+              border-2 border-solid border-gray-600 hover:border-gray-500
               ${aspectRatioClass}
             `}
-            onClick={onGenerate}
             style={{ minHeight: '120px' }}
           >
             <img 
@@ -572,6 +582,16 @@ export const VideoVersionViewer = ({
             </div>
           </div>
           
+          {/* Generate Cover Video button */}
+          {onGenerate && (
+            <button
+              onClick={onGenerate}
+              disabled={isUploading}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200"
+            >
+              {isUploading ? uploadLoadingMessage : 'Generate Cover Video'}
+            </button>
+          )}
         </div>
       );
     }

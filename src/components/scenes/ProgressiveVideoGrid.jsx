@@ -1102,7 +1102,27 @@ export const ProgressiveVideoGrid = ({
       {/* Comment System UI when regenerating or first time */}
       {(isRegenerating || (!hasExistingVideos && !legacyVideo)) && (
         <div className="space-y-6">
-          {/* Generate button removed - only using the one below image thumbnail */}
+          {/* Initial generation - Scene Text Input for all pages */}
+          {!isRegenerating && (!hasExistingVideos && !legacyVideo) && sceneId !== 'end' && (
+            <div>
+              <label className="block mb-3">
+                <span className="font-medium text-gray-300">
+                  {sceneId === 'cover' ? 'Cover Scene Text' : sceneId === 'music' ? 'Music Prompt' : 'Scene Text'}
+                </span>
+              </label>
+              <textarea
+                value={editableSceneText}
+                onChange={(e) => setEditableSceneText(e.target.value)}
+                className="w-full p-4 bg-gray-800 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition text-gray-300 resize-none"
+                rows={sceneId === 'music' ? 2 : 4}
+                placeholder={
+                  sceneId === 'cover' ? 'Cover analysis text from PDF will appear here...' :
+                  sceneId === 'music' ? 'Background music prompt from PDF will appear here...' :
+                  'Scene text from PDF analysis will appear here...'
+                }
+              />
+            </div>
+          )}
 
           {/* Regeneration - Comment System */}
           {isRegenerating && (
