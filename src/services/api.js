@@ -652,12 +652,19 @@ export const generateMusicWithElevenLabs = async (musicPrompt, setError, setLoad
       // Note: music_length_ms is controlled by composition_plan section durations
     };
     
+    // Get API key from environment variables (local .env or Railway production)
+    const apiKey = import.meta.env.VITE_ELEVENLABS_API_KEY || process.env.ELEVENLABS_API_KEY;
+    
+    if (!apiKey) {
+      throw new Error('ElevenLabs API key not found. Please set ELEVENLABS_API_KEY in your environment variables.');
+    }
+
     // Direct API call to ElevenLabs
     const response = await fetch('https://api.elevenlabs.io/v1/music', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'xi-api-key': 'sk_ae3474dc3b5cf90d49c3db3ffbf043f56945f2a5a5452ac1'
+        'xi-api-key': apiKey
       },
       body: JSON.stringify(musicInput)
     });
