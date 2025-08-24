@@ -1,0 +1,33 @@
+{
+  "name": "aura",
+  "version": "1.0.5",
+  "description": "Aura - AI-powered animation studio with perfect regeneration magic",
+  "type": "module",
+  "main": "server.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server.cjs",
+    "start": "npm run build && node server.cjs"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.1",
+    "express": "^4.18.2",
+    "firebase": "^12.1.0",
+    "pdfjs-dist": "^3.11.174",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.17",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.1.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

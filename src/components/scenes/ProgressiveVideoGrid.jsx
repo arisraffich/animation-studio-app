@@ -1,0 +1,1499 @@
+import React, { useState, useEffect } from 'react';
+import { VideoVersionViewer } from './VideoVersionViewer';
+import { ConfirmationModal } from '../common/ConfirmationModal';
+import { RegenerationModal } from '../common/RegenerationModal';
+import { generateScene, generateVideoWithSeedance, generateSeedancePrompt, createSeedanceTask, pollSeedanceTask, generateMusicWithElevenLabs, getSeedanceAspectRatio } from '../../services/api';
+import { Pencil, Plus, X, Check } from '../common/Icons';
+import { uploadImageFromBase64, deleteVersionImage, uploadMusicFromBlob, deleteVersionMusic } from '../../services/storageService';
+import { websocketService } from '../../services/websocketService';
+import { getProject, updateProject } from '../../services/firebaseService';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../../services/firebase';
+
+export const ProgressiveVideoGrid = ({ 
+  sceneId, 
+  project, 
+  updateProject, 
+  setError, 
+  isRegenerating,
+  onCancelRegeneration,
+  onOpenRegenerationModal,
+  selectionMode = false,
+  selectedVersions = new Set(),
+  setSelectedVersions = () => {},
+  onExitSelectionMode = () => {}
+}) => {
+  const [uploadImageBase64, setUploadImageBase64] = useState('');
+  const [imageDimensions, setImageDimensions] = useState(null);
+  const [uploadedImageData, setUploadedImageData] = useState(null); // Firebase Storage data
+  const [isUploading, setIsUploading] = useState(false);
+  const [isUploadingToStorage, setIsUploadingToStorage] = useState(false);
+  const [generationId, setGenerationId] = useState(null); // WebSocket generation tracking
+  const [loadingMessage, setLoadingMessage] = useState('Generating...');
+  const [editableSceneText, setEditableSceneText] = useState(project.scenes[sceneId]?.text || '');
+  
+  // Comment system state
+  const [selectedComments, setSelectedComments] = useState(new Set());
+  
+  // Regeneration modal state
+  const [isRegenerationModalOpen, setIsRegenerationModalOpen] = useState(false);
+  
+  // Unified workspace editing state
+  const [isEditingOriginalText, setIsEditingOriginalText] = useState(false);
+  const [editedOriginalText, setEditedOriginalText] = useState('');
+  const [isAddingNewNote, setIsAddingNewNote] = useState(false);
+  const [newNoteText, setNewNoteText] = useState('');
+  const [isEditingPrompt, setIsEditingPrompt] = useState(false);
+  const [editedPrompt, setEditedPrompt] = useState('');
+  const [originalPrompt, setOriginalPrompt] = useState(''); // Store original for restore
+  
+  // Get available comments from previous versions
+  const getAvailableComments = () => {
+    const existingVersions = sceneData?.videoVersions || [];
+    const comments = [];
+    
+    existingVersions.forEach(version => {
+      if (version.commentText && version.commentText.trim()) {
+        comments.push({
+          id: version.id,
+          text: version.commentText,
+          version: version.version,
+          createdAt: version.createdAt
+        });
+      }
+    });
+    
+    return comments;
+  };
+  
+  // Calculate final text for generation with unified workspace support
+  const calculateFinalText = () => {
+    // Use edited text if in edit mode, otherwise use stored/scene text
+    const originalText = isEditingOriginalText 
+      ? editedOriginalText 
+      : (sceneData?.videoVersions?.[0]?.originalText || editableSceneText);
+    
+    const comments = getAvailableComments();
+    const selectedCommentTexts = comments
+      .filter(comment => selectedComments.has(comment.id))
+      .map(comment => comment.text);
+    
+    // Add new note if exists
+    if (newNoteText.trim()) {
+      selectedCommentTexts.push(newNoteText.trim());
+    }
+    
+    return {
+      originalText,
+      animationNotes: selectedCommentTexts.join('. '),
+      selectedPreviousNotes: comments.filter(comment => selectedComments.has(comment.id)),
+      newNote: newNoteText.trim(),
+      finalText: selectedCommentTexts.length > 0 
+        ? `${originalText}. ${selectedCommentTexts.join('. ')}`
+        : originalText
+    };
+  };
+  
+  // Get the current prompt text, cleaned of prefixes
+  const getCurrentPrompt = () => {
+    const latestVersion = sceneData?.videoVersions?.find(v => v.isLatest);
+    if (latestVersion?.prompt?.prompt) {
+      // Remove "Seedance prompt:" prefix if present
+      return latestVersion.prompt.prompt.replace(/^Seedance prompt:\s*/i, '').trim();
+    }
+    return '';
+  };
+  
+  // Bulk selection functions use props instead of local state
+  
+  // Confirmation modal state
+  const [versionsToDelete, setVersionsToDelete] = useState([]);
+  const [isDeletingVersions, setIsDeletingVersions] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState('');
+  const [deleteError, setDeleteError] = useState(null);
+  
+  // Single version deletion progress tracking
+  const [isDeletingSingle, setIsDeletingSingle] = useState(false);
+  const [deletingVersionId, setDeletingVersionId] = useState(null);
+  
+  // Sync editableSceneText when project data changes
+  useEffect(() => {
+    const currentText = project.scenes[sceneId]?.text || '';
+    setEditableSceneText(currentText);
+  }, [project.scenes[sceneId]?.text, sceneId]);
+  
+  useEffect(() => {
+    websocketService.connect().catch(error => {
+      // WebSocket connection failed, will use fallback progress
+    });
+  }, []);
+  
+  // Cleanup WebSocket subscriptions when generationId changes
+  useEffect(() => {
+    return () => {
+      if (generationId) {
+        websocketService.unsubscribe(generationId);
+      }
+    };
+  }, [generationId]);
+  
+  // Clear local UI state when switching scenes
+  useEffect(() => {
+    // Clear local state when switching scenes to prevent cross-contamination
+    setIsUploading(false);
+    setLoadingMessage('');
+    setGenerationId(null);
+    setUploadImageBase64('');
+    setImageDimensions(null);
+    setUploadedImageData(null);
+    setIsUploadingToStorage(false);
+  }, [sceneId]);
+
+  const sceneData = project.scenes[sceneId];
+  const videoVersions = sceneData?.videoVersions || [];
+  
+  // Check if there are any videos with URLs
+  const videosWithUrls = videoVersions.filter(v => v.prompt?.video_url);
+  const hasExistingVideos = videosWithUrls.length > 0;
+
+  // Handle backward compatibility
+  const legacyVideo = sceneData?.prompt?.video_url && videoVersions.length === 0;
+  
+  // Check if we have a stored image for this scene (for regeneration)
+  const storedImageData = sceneData?.storedImage;
+  const hasStoredImage = storedImageData?.url && storedImageData?.dimensions;
+  
+
+
+  const handleImageUpload = async (file, onComplete = null) => {
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const img = new Image();
+      img.onload = async () => {
+        // Store original dimensions before resizing
+        const originalDimensions = {
+          width: img.width,
+          height: img.height
+        };
+        setImageDimensions(originalDimensions);
+        
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        const maxWidth = 1024;
+        const maxHeight = 1024;
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > height) {
+          if (width > maxWidth) {
+            height *= maxWidth / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width *= maxHeight / height;
+            height = maxHeight;
+          }
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        const base64String = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+        setUploadImageBase64(base64String);
+        
+        const currentScene = project.scenes[sceneId] || {};
+        
+        // Always upload to storage and update stored image when user uploads custom image
+        setIsUploadingToStorage(true);
+        try {
+          const existingVersions = currentScene.videoVersions || [];
+          const versionId = `v${existingVersions.length + 1}`;
+          const storageData = await uploadImageFromBase64(
+            project.id,
+            sceneId,
+            versionId,
+            base64String
+          );
+          setUploadedImageData(storageData);
+          
+          // Update stored image in database when replacing existing stored image
+          if (currentScene.storedImage) {
+            console.log('🔄 Replacing stored image with custom upload for scene:', sceneId);
+            
+            // Update the project in Firebase with new stored image
+            updateProject(project.id, {
+              scenes: {
+                ...project.scenes,
+                [sceneId]: {
+                  ...currentScene,
+                  storedImage: {
+                    url: storageData.url,
+                    dimensions: originalDimensions,
+                    path: storageData.path,
+                    isCustom: true // Mark as custom uploaded
+                  }
+                }
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Storage upload failed:', error);
+          // Continue without failing - fallback to base64 during generation
+        }
+        setIsUploadingToStorage(false);
+        
+        // Call completion callback to clear uploading state
+        if (onComplete) {
+          onComplete();
+        }
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleGenerate = async () => {
+    // Prevent double execution
+    if (isUploading) {
+      return;
+    }
+
+
+    // Determine which image to use for generation
+    let imageToUse = uploadImageBase64;
+    let dimensionsToUse = imageDimensions;
+    
+    // For cover scene, use PDF page dimensions instead of image dimensions
+    if (sceneId === 'cover' && project.pageDimensions) {
+      dimensionsToUse = {
+        width: project.pageDimensions.width,
+        height: project.pageDimensions.height
+      };
+    }
+    
+    // If regenerating and no new image uploaded, use stored image  
+    if (isRegenerating && !uploadImageBase64 && hasStoredImage) {
+      // Always fetch from Firebase Storage URL
+      imageToUse = 'FETCH_REQUIRED';
+      dimensionsToUse = storedImageData.dimensions;
+    }
+    
+    // If cover has stored image but no upload, use it for generation
+    if (sceneId === 'cover' && !uploadImageBase64 && hasStoredImage && !isRegenerating) {
+      imageToUse = 'FETCH_REQUIRED';
+      dimensionsToUse = storedImageData.dimensions;
+    }
+    
+    // If regular story page has stored image but no upload, use it for generation
+    if (sceneId !== 'end' && sceneId !== 'cover' && sceneId !== 'music' && !uploadImageBase64 && hasStoredImage && !isRegenerating) {
+      imageToUse = 'FETCH_REQUIRED';
+      dimensionsToUse = storedImageData.dimensions;
+    }
+
+    if (sceneId !== 'end' && sceneId !== 'cover' && sceneId !== 'music' && !imageToUse) {
+      setError('Please upload an image first.');
+      return;
+    }
+    
+    // For cover scenes, we can proceed without image upload if cover already exists in PDF
+    if (sceneId === 'cover' && !imageToUse && !hasStoredImage) {
+      setError('Cover image is required. Please upload your PDF with cover page or upload cover image manually.');
+      return;
+    }
+
+    setIsUploading(true);
+    setLoadingMessage('Starting generation... 15%');
+    setError('');
+    
+    // Handle Firebase URL fetch AFTER showing loading state (eliminates delay)
+    if (imageToUse === 'FETCH_REQUIRED') {
+      setLoadingMessage('Loading stored image...');
+      try {
+        const response = await fetch('/api/firebase-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: storedImageData.url })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Server fetch failed: ${response.status}`);
+        }
+        
+        const { base64 } = await response.json();
+        imageToUse = base64;
+        
+        // Set for display
+        setUploadImageBase64(base64);
+        setImageDimensions(storedImageData.dimensions);
+        
+      } catch (error) {
+        setError('Failed to load stored image for regeneration.');
+        setIsUploading(false);
+        return;
+      }
+    }
+    
+    const currentGenerationId = `gen_${project.id}_${sceneId}_${Date.now()}`;
+    setGenerationId(currentGenerationId);
+    
+    // Track generation locally only
+    
+    // IMMEDIATE UI UPDATE: Create loading video card
+    const existingScene = project.scenes[sceneId] || {};
+    const existingVersions = sceneId === 'music' ? (existingScene.musicVersions || []) : (existingScene.videoVersions || []);
+    const nextVersionNumber = existingVersions.length + 1;
+    
+    // Create temporary loading version for immediate UI feedback
+    const loadingVersion = {
+      id: currentGenerationId, // Use generation ID as temporary ID
+      version: nextVersionNumber,
+      isLatest: true,
+      isLoading: true, // Special flag for loading state
+      prompt: {
+        loading: true,
+        generationId: currentGenerationId
+      },
+      uploadedAt: new Date().toISOString()
+    };
+    
+    // Add loading version to existing versions
+    const versionsWithLoading = existingVersions.map(v => ({ ...v, isLatest: false }));
+    versionsWithLoading.push(loadingVersion);
+    
+    // Update project state immediately to show loading card
+    const versionField = sceneId === 'music' ? 'musicVersions' : 'videoVersions';
+    const updatedScenes = {
+      ...project.scenes,
+      [sceneId]: {
+        ...existingScene,
+        status: 'in_progress',
+        [versionField]: versionsWithLoading
+      }
+    };
+    
+    updateProject(project.id, { scenes: updatedScenes });
+    
+    // const updatedScenesForProgress = {
+    //   ...project.scenes,
+    //   [sceneId]: {
+    //     ...project.scenes[sceneId],
+    //     status: 'in_progress',
+    //     text: editableSceneText
+    //   }
+    // };
+    // updateProject(project.id, { scenes: updatedScenesForProgress });
+    
+    // Enhanced WebSocket progress callback with unified progression
+    let lastProgress = 15;
+    const handleWebSocketProgress = (progressData) => {
+      if (progressData.generationId === currentGenerationId || !progressData.generationId) {
+        let progress = progressData.progress || 0;
+        
+        // Always maintain forward progression - use the higher of current or new
+        progress = Math.max(lastProgress, Math.round(progress));
+        lastProgress = progress;
+        
+        // Unified message regardless of backend stage
+        const isMusic = sceneId === 'music';
+        const message = progress >= 100 
+          ? (isMusic ? 'Music generation complete!' : 'Video generation complete!')
+          : (isMusic ? 'Generating music...' : 'Generating video...');
+        
+        setLoadingMessage(`${message} ${progress}%`);
+        
+        // Clear fallback timer when WebSocket takes over
+        if (progressTimer) {
+          clearInterval(progressTimer);
+          progressTimer = null;
+        }
+      }
+    };
+    
+    // Subscribe to WebSocket progress updates
+    websocketService.subscribe(currentGenerationId, handleWebSocketProgress);
+    
+    let progressTimer = null;
+    let currentProgress = 15;
+    
+    const updateProgress = () => {
+      // Use clean integer increments instead of random decimals
+      const increment = currentProgress < 30 ? 2 : 
+                       currentProgress < 50 ? 1 : 
+                       currentProgress < 70 ? 1 : 0;
+      
+      currentProgress += increment;
+      
+      // Cap fallback progress at 90% to leave room for WebSocket updates
+      if (currentProgress >= 90) {
+        currentProgress = 90;
+        clearInterval(progressTimer);
+        return;
+      }
+      
+      // Keep unified message throughout
+      const isMusic = sceneId === 'music';
+      const message = isMusic ? 'Generating music...' : 'Generating video...';
+      
+      setLoadingMessage(`${message} ${Math.round(currentProgress)}%`);
+      lastProgress = Math.max(lastProgress, Math.round(currentProgress));
+    };
+    
+    // Start fallback progress immediately (WebSocket will override if it works)
+    progressTimer = setInterval(updateProgress, 500); // Faster updates - every 500ms
+
+    try {
+      let finalUploadedImageData = uploadedImageData;
+      
+      // Get scene data early for use throughout the function
+      const existingScene = project.scenes[sceneId] || {};
+      const existingVersions = existingScene.videoVersions || [];
+      
+      // Calculate final text using comment system
+      const textData = calculateFinalText();
+      
+      // Create modified project with final combined text
+      const projectWithEditedText = {
+        ...project,
+        scenes: {
+          ...project.scenes,
+          [sceneId]: {
+            ...project.scenes[sceneId],
+            text: textData.finalText
+          }
+        }
+      };
+      
+      let uploadPromise = Promise.resolve(finalUploadedImageData);
+      let promptPromise;
+      
+      // Start both operations in parallel
+      // Let unified progress system handle messages
+      
+      // If we still need to upload, do it in parallel
+      if (imageToUse && !existingScene.storedImage && !uploadedImageData) {
+        uploadPromise = (async () => {
+          try {
+            const versionId = `v${existingVersions.length + 1}`;
+            const result = await uploadImageFromBase64(
+              project.id, 
+              sceneId, 
+              versionId, 
+              imageToUse
+            );
+            return result;
+          } catch (error) {
+            return null;
+          }
+        })();
+      }
+      
+      // Start prompt generation immediately
+      if (sceneId !== 'end' && sceneId !== 'music') {
+        promptPromise = (async () => {
+          try {
+            // Check if user has edited the prompt
+            if (editedPrompt.trim()) {
+              // Use custom prompt - create task directly with user's prompt
+              const predictionId = await createSeedanceTask(
+                imageToUse,
+                editedPrompt.trim(),
+                dimensionsToUse,
+                setError,
+                currentGenerationId,
+                5
+              );
+              
+              // Poll for completion
+              let attempts = 0;
+              const maxAttempts = 60;
+              
+              while (attempts < maxAttempts) {
+                const prediction = await pollSeedanceTask(predictionId, setError, currentGenerationId);
+                
+                if (prediction.status === 'succeeded' && prediction.output) {
+                  return {
+                    prompt: editedPrompt.trim(),
+                    video_url: prediction.output,
+                    prediction_id: predictionId,
+                    model: 'seedance-custom',
+                    aspect_ratio: dimensionsToUse ? getSeedanceAspectRatio(dimensionsToUse.width, dimensionsToUse.height) : '16:9',
+                    resolution: '1080p',
+                    duration: 5
+                  };
+                } else if (prediction.status === 'failed') {
+                  throw new Error(`Custom prompt generation failed: ${prediction.error || 'Unknown error'}`);
+                } else if (prediction.status === 'canceled') {
+                  throw new Error('Custom prompt generation was canceled');
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 10000));
+                attempts++;
+              }
+              
+              throw new Error('Custom prompt generation timed out after 10 minutes');
+            } else {
+              // Use Seedance for all scenes including cover with GPT-5 generated prompts
+              return await generateVideoWithSeedance(
+                projectWithEditedText, 
+                sceneId, 
+                imageToUse, 
+                '', // No feedback
+                setError, 
+                setLoadingMessage, 
+                { 
+                  imageDimensions: dimensionsToUse, 
+                  textData,
+                  generationId: currentGenerationId,
+                  websocketCallback: handleWebSocketProgress
+                }
+              );
+            }
+          } catch (error) {
+            // If video generation fails, fall back to JSON only
+            setError(`Video generation failed: ${error.message}. Generated prompt without video.`);
+            // Creating scene data - let unified system handle
+            const fallbackPrompt = await generateScene(projectWithEditedText, sceneId, imageToUse, '', setError, textData);
+            fallbackPrompt.video_generation_failed = true;
+            return fallbackPrompt;
+          }
+        })();
+      } else if (sceneId === 'end') {
+        // End scene - text-to-video generation using story elements
+        promptPromise = (async () => {
+          try {
+            console.log('🎬 End Scene Generation - Starting...');
+            console.log('🎬 Project:', projectWithEditedText.name);
+            console.log('🎬 Scene ID:', sceneId);
+            console.log('🎬 Text Data:', textData);
+            
+            // Generate sophisticated end scene prompt using GPT-5
+            const endScenePrompt = await generateSeedancePrompt(projectWithEditedText, sceneId, null, '', setError, textData);
+            console.log('🎬 Generated Seedance prompt:', endScenePrompt);
+            
+            // Create text-to-video generation (no image input)
+            console.log('🎬 Creating Seedance task...');
+            const predictionId = await createSeedanceTask(
+              null, // No image for end scene
+              endScenePrompt,
+              project.pageDimensions || { width: 1920, height: 1080 }, // Use book dimensions or default
+              setError,
+              currentGenerationId,
+              5 // 5 second duration
+            );
+            console.log('🎬 Seedance task created, prediction ID:', predictionId);
+            
+            // Poll for completion with progress updates
+            let attempts = 0;
+            const maxAttempts = 60; // 10 minutes max
+            console.log('🎬 Starting polling for end scene generation...');
+            
+            while (attempts < maxAttempts) {
+              const prediction = await pollSeedanceTask(predictionId, setError, currentGenerationId);
+              console.log(`🎬 Poll attempt ${attempts + 1}, status:`, prediction.status);
+              
+              if (prediction.status === 'succeeded' && prediction.output) {
+                console.log('🎬 End scene video generated successfully!', prediction.output);
+                return {
+                  prompt: endScenePrompt,
+                  video_url: prediction.output,
+                  prediction_id: predictionId,
+                  model: 'seedance-end-scene',
+                  aspect_ratio: project.pageDimensions ? 
+                    `${project.pageDimensions.width}:${project.pageDimensions.height}` : '16:9',
+                  resolution: '1080p',
+                  duration: 5
+                };
+              } else if (prediction.status === 'failed') {
+                console.error('🎬 End scene generation failed:', prediction.error);
+                throw new Error(`End scene generation failed: ${prediction.error || 'Unknown error'}`);
+              } else if (prediction.status === 'canceled') {
+                console.error('🎬 End scene generation canceled');
+                throw new Error('End scene generation was canceled');
+              }
+              
+              // Update progress for end scene
+              const progress = Math.min(90, 30 + (attempts * 2)); // Start at 30%, progress to 90%
+              setLoadingMessage(`Creating end scene... ${progress}%`);
+              
+              await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+              attempts++;
+            }
+            
+            console.error('🎬 End scene generation timed out after 10 minutes');
+            throw new Error('End scene generation timed out after 10 minutes');
+          } catch (error) {
+            console.error('🎬 End scene generation error:', error);
+            // Fallback to simple JSON scene if video generation fails
+            setError(`End scene video generation failed: ${error.message}. Generated prompt without video.`);
+            const fallbackPrompt = await generateScene(projectWithEditedText, sceneId, null, '', setError, textData);
+            fallbackPrompt.video_generation_failed = true;
+            return fallbackPrompt;
+          }
+        })();
+      } else if (sceneId === 'music') {
+        // Music scene - text-to-audio generation using background music prompt
+        promptPromise = (async () => {
+          try {
+            
+            // Use the music prompt from the scene text
+            const musicPrompt = textData.finalText;
+            
+            // Generate music with ElevenLabs
+            const musicResult = await generateMusicWithElevenLabs(
+              musicPrompt,
+              setError,
+              setLoadingMessage,
+              { 
+                generationId: currentGenerationId,
+                websocketCallback: handleWebSocketProgress
+              }
+            );
+            
+            return {
+              prompt: musicPrompt,
+              audio_url: musicResult.audio_url, // Temporary blob URL for immediate playback
+              audio_blob: musicResult.audio_blob, // Blob for Firebase Storage upload
+              model: musicResult.model,
+              format: musicResult.format,
+              duration: musicResult.duration
+            };
+          } catch (error) {
+            setError(`Music generation failed: ${error.message}. Generated prompt without audio.`);
+            
+            // Fallback - return just the prompt without audio
+            return {
+              prompt: textData.finalText,
+              music_generation_failed: true,
+              model: 'elevenlabs-fallback',
+              format: 'mp3',
+              duration: 30
+            };
+          }
+        })();
+      }
+      
+      // Wait for both operations to complete
+      const [parallelUploadResult, newPrompt] = await Promise.all([uploadPromise, promptPromise]);
+      
+      // Use the parallel upload result if it succeeded
+      if (parallelUploadResult && !finalUploadedImageData) {
+        finalUploadedImageData = parallelUploadResult;
+      }
+      
+      // Handle music file storage for music scenes
+      let finalMusicFileData = null;
+      if (sceneId === 'music' && newPrompt && newPrompt.audio_blob && !newPrompt.music_generation_failed) {
+        try {
+          setLoadingMessage('Storing music file...');
+          const versionId = `v${existingVersions.length + 1}`;
+          finalMusicFileData = await uploadMusicFromBlob(
+            project.id,
+            sceneId,
+            versionId,
+            newPrompt.audio_blob
+          );
+          
+          // Clean up the temporary blob URL to free memory
+          if (newPrompt.audio_url && newPrompt.audio_url.startsWith('blob:')) {
+            URL.revokeObjectURL(newPrompt.audio_url);
+          }
+        } catch (error) {
+          // Don't fail the whole generation - just log the error
+          setError(`Music generated successfully but file storage failed: ${error.message}`);
+        }
+      }
+      
+      
+      // Handle video versioning (variables already declared above)
+      
+      // Using pre-uploaded image - let unified system handle
+
+      // Create new version entry with comment system support
+      const newVersion = {
+        id: Date.now(), // Simple timestamp ID
+        version: existingVersions.length + 1,
+        createdAt: new Date().toISOString(),
+        prompt: sceneId === 'music' && finalMusicFileData ? {
+          ...newPrompt,
+          audio_url: finalMusicFileData.url // Replace blob URL with Firebase Storage URL
+        } : newPrompt,
+        isLatest: true,
+        // Comment system fields
+        originalText: existingVersions.length === 0 ? textData.originalText : existingVersions[0].originalText,
+        commentText: newNoteText.trim(), // Store the new note from unified workspace
+        finalText: textData.finalText,
+        // Music file data for music scenes
+        ...(sceneId === 'music' && finalMusicFileData ? {
+          musicFile: {
+            url: finalMusicFileData.url,
+            path: finalMusicFileData.path,
+            size: finalMusicFileData.size,
+            uploadedAt: new Date().toISOString()
+          }
+        } : {})
+      };
+      
+      // Mark previous versions as not latest
+      const updatedVersions = existingVersions.map(v => ({ ...v, isLatest: false }));
+      updatedVersions.push(newVersion);
+      
+
+      // Determine status based on whether video was actually generated
+      const hasVideo = newPrompt && (newPrompt.video_url || newPrompt.audio_url);
+      const newStatus = hasVideo ? 'completed' : 'in_progress';
+
+      const updatedScenes = {
+        ...project.scenes,
+        [sceneId]: {
+          ...existingScene,
+          status: newStatus, // completed only when video/audio is ready, otherwise in_progress
+          prompt: sceneId === 'music' && finalMusicFileData ? {
+            ...newPrompt,
+            audio_url: finalMusicFileData.url // Replace blob URL with Firebase Storage URL
+          } : newPrompt, // Keep for backward compatibility
+          text: editableSceneText,
+          [versionField]: updatedVersions,
+          // Store image data for future regenerations (first time only)
+          storedImage: existingScene.storedImage || (finalUploadedImageData ? {
+            url: finalUploadedImageData.url,
+            path: finalUploadedImageData.path,
+            dimensions: dimensionsToUse,
+            uploadedAt: new Date().toISOString()
+          } : null)
+        }
+      };
+      
+      let projectUpdates = { scenes: updatedScenes };
+      if (sceneId === 'cover' && newPrompt.extracted_title) {
+        projectUpdates.name = newPrompt.extracted_title;
+        projectUpdates.author = newPrompt.extracted_author || 'Unknown Author';
+      }
+
+      updateProject(project.id, projectUpdates);
+      
+      // Reset upload state and comment system
+      setUploadImageBase64('');
+      setImageDimensions(null);
+      setSelectedComments(new Set());
+      
+      // Reset unified workspace state
+      setIsEditingOriginalText(false);
+      setEditedOriginalText('');
+      setIsAddingNewNote(false);
+      setNewNoteText('');
+      setIsEditingPrompt(false);
+      setEditedPrompt('');
+      setOriginalPrompt('');
+      
+      websocketService.unsubscribe(currentGenerationId);
+      setGenerationId(null);
+      
+      // Close modal and regeneration mode
+      setIsRegenerationModalOpen(false);
+      onCancelRegeneration();
+
+    } catch (err) {
+      setError(`Operation failed: ${err.message}.`);
+      if (progressTimer) clearInterval(progressTimer);
+      
+      // Clean up WebSocket on error
+      websocketService.unsubscribe(currentGenerationId);
+      setGenerationId(null);
+    } finally {
+      setIsUploading(false);
+      if (progressTimer) clearInterval(progressTimer);
+    }
+  };
+
+  // Handle individual version deletion (video or music)
+  const handleDeleteVersion = async (versionId) => {
+    try {
+      // Start deletion progress
+      setIsDeletingSingle(true);
+      setDeletingVersionId(versionId);
+      setSingleDeleteProgress('🗑️ Starting deletion...');
+      setSingleDeleteError(null);
+      
+      const existingScene = project.scenes[sceneId] || {};
+      
+      // Handle music scene deletion - CLEAN SIMPLE LOGIC
+      if (sceneId === 'music') {
+        const existingVersions = existingScene.musicVersions || [];
+        
+        // Find the version being deleted to get version number for Storage cleanup
+        const versionToDelete = existingVersions.find(v => v.id === versionId);
+        if (versionToDelete) {
+          // Delete Storage file (with proper await and error handling)
+          setSingleDeleteProgress('📁 Removing music file...');
+          try {
+            await deleteVersionMusic(project.id, sceneId, `v${versionToDelete.version}`);
+          } catch (storageError) {
+            console.warn('⚠️ Music storage cleanup failed:', storageError.message);
+            setSingleDeleteError(`Storage cleanup failed: ${storageError.message}`);
+            // Continue with database deletion - don't let storage issues block user
+          }
+        }
+        
+        // Filter out the deleted version
+        const remainingVersions = existingVersions.filter(v => v.id !== versionId);
+        
+        if (remainingVersions.length === 0) {
+          // Complete scene reset - delete everything except preserve original text
+          const updatedScenes = {
+            ...project.scenes,
+            [sceneId]: {
+              text: existingScene.text || '', // Preserve original scene text
+              status: 'pending'
+              // Clear: prompt, musicVersions, musicFile - everything else
+            }
+          };
+          const projectRef = doc(db, 'projects', project.id);
+          await updateDoc(projectRef, { scenes: updatedScenes });
+          
+          // IMMEDIATE UI UPDATE: Refresh parent component state
+          updateProject(project.id, { scenes: updatedScenes });
+        } else {
+          // Just remove this version, update latest flag
+          const updatedVersions = remainingVersions.map(v => ({
+            ...v,
+            isLatest: false
+          }));
+          
+          // Make highest version number the new "latest"
+          if (updatedVersions.length > 0) {
+            const maxVersion = Math.max(...updatedVersions.map(v => v.version));
+            const latestVersion = updatedVersions.find(v => v.version === maxVersion);
+            if (latestVersion) {
+              latestVersion.isLatest = true;
+            }
+          }
+
+          const updatedScenes = {
+            ...project.scenes,
+            [sceneId]: {
+              ...existingScene,
+              musicVersions: updatedVersions,
+              prompt: updatedVersions.find(v => v.isLatest)?.prompt || existingScene.prompt
+            }
+          };
+          
+          const projectRef = doc(db, 'projects', project.id);
+          await updateDoc(projectRef, { scenes: updatedScenes });
+          
+          // IMMEDIATE UI UPDATE: Refresh parent component state
+          updateProject(project.id, { scenes: updatedScenes });
+        }
+      } else {
+        // Handle video version deletion - EXACT ORIGINAL LOGIC
+        const existingVersions = existingScene.videoVersions || [];
+        
+        // Find the version being deleted to get version number for Storage cleanup
+        const versionToDelete = existingVersions.find(v => v.id === versionId);
+        if (versionToDelete) {
+          // Delete Storage file (with proper await and error handling)
+          setSingleDeleteProgress('📁 Removing video file...');
+          try {
+            await deleteVersionImage(project.id, sceneId, `v${versionToDelete.version}`);
+          } catch (storageError) {
+            console.warn('⚠️ Video storage cleanup failed:', storageError.message);
+            setSingleDeleteError(`Storage cleanup failed: ${storageError.message}`);
+            // Continue with database deletion - don't let storage issues block user
+          }
+        }
+        
+        // Filter out the deleted version
+        const remainingVersions = existingVersions.filter(v => v.id !== versionId);
+        
+        if (remainingVersions.length === 0) {
+          // Complete scene reset - delete everything except preserve original text  
+          const updatedScenes = {
+            ...project.scenes,
+            [sceneId]: {
+              text: existingScene.text || '', // Preserve original scene text
+              status: 'pending'
+              // Clear: prompt, videoVersions, storedImage - everything else
+            }
+          };
+          const projectRef = doc(db, 'projects', project.id);
+          await updateDoc(projectRef, { scenes: updatedScenes });
+          
+          // IMMEDIATE UI UPDATE: Refresh parent component state
+          updateProject(project.id, { scenes: updatedScenes });
+        } else {
+          // Just remove this version, update latest flag
+          const updatedVersions = remainingVersions.map(v => ({
+            ...v,
+            isLatest: false
+          }));
+          
+          // Make highest version number the new "latest"
+          if (updatedVersions.length > 0) {
+            const maxVersion = Math.max(...updatedVersions.map(v => v.version));
+            const latestVersion = updatedVersions.find(v => v.version === maxVersion);
+            if (latestVersion) {
+              latestVersion.isLatest = true;
+            }
+          }
+
+          const updatedScenes = {
+            ...project.scenes,
+            [sceneId]: {
+              ...existingScene,
+              videoVersions: updatedVersions,
+              prompt: updatedVersions.find(v => v.isLatest)?.prompt || existingScene.prompt
+            }
+          };
+          
+          setSingleDeleteProgress('💾 Updating database...');
+          const projectRef = doc(db, 'projects', project.id);
+          await updateDoc(projectRef, { scenes: updatedScenes });
+          
+          // IMMEDIATE UI UPDATE: Refresh parent component state
+          updateProject(project.id, { scenes: updatedScenes });
+          
+          // Success - complete the deletion
+          setSingleDeleteProgress('✅ Deletion completed!');
+          setTimeout(() => {
+            setIsDeletingSingle(false);
+            setDeletingVersionId(null);
+            setSingleDeleteProgress('');
+            setSingleDeleteError(null);
+          }, 2000); // Auto-close after 2 seconds
+        }
+      }
+    } catch (error) {
+      console.error('❌ Single deletion failed:', error);
+      setSingleDeleteError(`Failed to delete: ${error.message}`);
+      // Keep modal open for retry
+    }
+  };
+
+  // Retry single version deletion
+  const retrySingleDelete = () => {
+    if (deletingVersionId) {
+      setSingleDeleteError(null);
+      handleDeleteVersion(deletingVersionId);
+    }
+  };
+
+  // Cancel single deletion
+  const cancelSingleDelete = () => {
+    setIsDeletingSingle(false);
+    setDeletingVersionId(null);
+    setSingleDeleteProgress('');
+    setSingleDeleteError(null);
+  };
+
+  // Bulk selection functions
+  const toggleVersionSelection = (versionId) => {
+    const newSet = new Set(selectedVersions);
+    if (newSet.has(versionId)) {
+      newSet.delete(versionId);
+    } else {
+      newSet.add(versionId);
+    }
+    setSelectedVersions(newSet);
+  };
+
+  const toggleSelectAll = () => {
+    const allVersions = videoVersions.filter(v => v.prompt?.video_url);
+    if (selectedVersions.size === allVersions.length) {
+      // Deselect all
+      setSelectedVersions(new Set());
+    } else {
+      // Select all
+      setSelectedVersions(new Set(allVersions.map(v => v.id)));
+    }
+  };
+
+  // Show confirmation modal for bulk delete
+  const bulkDeleteVersions = () => {
+    if (selectedVersions.size === 0) return;
+    
+    const existingScene = project.scenes[sceneId] || {};
+    const existingVersions = existingScene.videoVersions || [];
+    const versionsToDelete = existingVersions.filter(v => selectedVersions.has(v.id));
+    
+    setVersionsToDelete(versionsToDelete);
+  };
+
+  // Actual bulk deletion after confirmation
+  const confirmBulkDelete = async () => {
+    try {
+      setIsDeletingVersions(true);
+      setDeleteError(null);
+      
+      const isMultiple = versionsToDelete.length > 1;
+      const versionText = isMultiple ? `${versionsToDelete.length} video versions` : 'video version';
+      
+      setDeleteProgress(`Preparing to delete ${versionText}...`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      setDeleteProgress('Removing video files...');
+      
+      // Delete Storage files for selected versions (fire and forget)
+      const existingScene = project.scenes[sceneId] || {};
+      const existingVersions = existingScene.videoVersions || [];
+      const versionsToDeleteFromStorage = existingVersions.filter(v => selectedVersions.has(v.id));
+      
+      // Delete storage files for each version (with proper await)
+      for (const version of versionsToDeleteFromStorage) {
+        try {
+          await deleteVersionImage(project.id, sceneId, `v${version.version}`);
+        } catch (storageError) {
+          console.warn(`⚠️ Storage cleanup failed for version ${version.version}:`, storageError.message);
+          // Continue with other deletions - don't let storage issues block user
+        }
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 800));
+      
+      setDeleteProgress(`Deleting ${versionText}...`);
+      
+      // Filter out deleted versions
+      const remainingVersions = existingVersions.filter(v => !selectedVersions.has(v.id));
+      
+      if (remainingVersions.length === 0) {
+        // Complete scene reset - preserve original scene text
+        const existingScene = project.scenes[sceneId] || {};
+        const updatedScenes = {
+          ...project.scenes,
+          [sceneId]: {
+            text: existingScene.text || '', // Preserve original scene text
+            status: 'pending'
+          }
+        };
+        const projectRef = doc(db, 'projects', project.id);
+        await updateDoc(projectRef, { scenes: updatedScenes });
+        
+        // IMMEDIATE UI UPDATE: Refresh parent component state
+        updateProject(project.id, { scenes: updatedScenes });
+      } else {
+        // Update remaining versions
+        const updatedVersions = remainingVersions.map(v => ({
+          ...v,
+          isLatest: false
+        }));
+        
+        // Make highest version the latest
+        if (updatedVersions.length > 0) {
+          const maxVersion = Math.max(...updatedVersions.map(v => v.version));
+          const latestVersion = updatedVersions.find(v => v.version === maxVersion);
+          if (latestVersion) {
+            latestVersion.isLatest = true;
+          }
+        }
+
+        const updatedScenes = {
+          ...project.scenes,
+          [sceneId]: {
+            ...existingScene,
+            videoVersions: updatedVersions,
+            prompt: updatedVersions.find(v => v.isLatest)?.prompt || existingScene.prompt
+          }
+        };
+        
+        const projectRef = doc(db, 'projects', project.id);
+        await updateDoc(projectRef, { scenes: updatedScenes });
+        
+        // IMMEDIATE UI UPDATE: Refresh parent component state
+        updateProject(project.id, { scenes: updatedScenes });
+      }
+      
+      setDeleteProgress('Cleaning up...');
+      
+      // Close modal and exit selection mode
+      setVersionsToDelete([]);
+      setIsDeletingVersions(false);
+      setDeleteProgress('');
+      setSelectedVersions(new Set());
+      onExitSelectionMode();
+      
+    } catch (error) {
+      setIsDeletingVersions(false);
+      setDeleteProgress('');
+      setDeleteError(`Failed to delete video versions: ${error.message}`);
+    }
+  };
+
+  const cancelDelete = () => {
+    setVersionsToDelete([]);
+    setIsDeletingVersions(false);
+    setDeleteProgress('');
+    setDeleteError(null);
+  };
+
+  // Modal handlers
+  const openRegenerationModal = () => {
+    setIsRegenerationModalOpen(true);
+  };
+
+  // Pass modal function up to parent on mount
+  React.useEffect(() => {
+    if (onOpenRegenerationModal) {
+      onOpenRegenerationModal(openRegenerationModal);
+    }
+  }, [onOpenRegenerationModal]);
+
+  // Auto-scroll modal content to bottom when adding new note
+  React.useEffect(() => {
+    if (isAddingNewNote) {
+      setTimeout(() => {
+        const modalContent = document.getElementById('regeneration-modal-content');
+        if (modalContent) {
+          modalContent.scrollTo({ 
+            top: modalContent.scrollHeight, 
+            behavior: 'smooth' 
+          });
+        }
+      }, 100);
+    }
+  }, [isAddingNewNote]);
+
+  // Auto-scroll when textarea content changes (new lines added)
+  React.useEffect(() => {
+    if (isAddingNewNote && newNoteText) {
+      setTimeout(() => {
+        const modalContent = document.getElementById('regeneration-modal-content');
+        if (modalContent) {
+          modalContent.scrollTo({ 
+            top: modalContent.scrollHeight, 
+            behavior: 'smooth' 
+          });
+        }
+      }, 50);
+    }
+  }, [newNoteText, isAddingNewNote]);
+
+  const closeRegenerationModal = () => {
+    setIsRegenerationModalOpen(false);
+    
+    // Reset unified workspace state when closing modal
+    setIsEditingOriginalText(false);
+    setEditedOriginalText('');
+    setIsAddingNewNote(false);
+    setNewNoteText('');
+    setIsEditingPrompt(false);
+    setEditedPrompt('');
+    setOriginalPrompt('');
+    setSelectedComments(new Set());
+  };
+
+  const handleModalGenerate = () => {
+    handleGenerate();
+    // Modal will close in handleGenerate success
+  };
+
+  const handleModalCancel = () => {
+    closeRegenerationModal();
+    onCancelRegeneration();
+  };
+  
+  return (
+    <>
+      <ConfirmationModal 
+        projects={versionsToDelete.map(v => ({ 
+          id: v.id, 
+          name: `Version ${v.version}` 
+        }))}
+        onConfirm={confirmBulkDelete} 
+        onCancel={cancelDelete}
+        isDeleting={isDeletingVersions}
+        deleteProgress={deleteProgress}
+        deleteError={deleteError}
+      />
+      
+      {/* Single version deletion modal */}
+      {isDeletingSingle && (
+        <ConfirmationModal 
+          project={deletingVersionId ? { 
+            id: deletingVersionId, 
+            name: `${sceneId === 'music' ? 'Music' : 'Video'} Version` 
+          } : null}
+          onConfirm={retrySingleDelete} 
+          onCancel={cancelSingleDelete}
+          isDeleting={isDeletingSingle}
+          deleteProgress=""
+          deleteError={null}
+        />
+      )}
+      {/* Selection mode controls - only show when in selection mode */}
+      {selectionMode && (hasExistingVideos || legacyVideo) && (
+        <div className="flex items-center gap-2 mb-3">
+          <button
+            onClick={toggleSelectAll}
+            className="flex items-center gap-2 text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors duration-200"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="2"/>
+              {selectedVersions.size === videoVersions.filter(v => v.prompt?.video_url).length ? (
+                <path d="m9 12 2 2 4-4" strokeWidth="2"/>
+              ) : (
+                <path d="M12 8v8M8 12h8" strokeWidth="2"/>
+              )}
+            </svg>
+            {selectedVersions.size === videoVersions.filter(v => v.prompt?.video_url).length ? 'Deselect All' : 'Select All'}
+          </button>
+          
+          {selectedVersions.size > 0 && (
+            <button
+              onClick={bulkDeleteVersions}
+              className="flex items-center gap-2 text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg transition-colors duration-200"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h0M10 11v6M14 11v6" strokeWidth="2"/>
+              </svg>
+              Delete ({selectedVersions.size})
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="space-y-4">
+      {/* Show existing videos with upload card if regenerating */}
+      <div>
+        
+        <VideoVersionViewer 
+          sceneId={sceneId} 
+          sceneData={sceneData}
+          project={project}
+          showUploadCard={!hasExistingVideos && !hasStoredImage && !isUploading && !generationId && sceneId !== 'end' && sceneId !== 'music' && sceneId !== 'cover'}
+          onImageUpload={handleImageUpload}
+          uploadImageBase64={uploadImageBase64}
+          isUploading={isUploading}
+          uploadLoadingMessage={loadingMessage}
+          isRegenerating={isRegenerating}
+          onDeleteVersion={handleDeleteVersion}
+          selectionMode={selectionMode}
+          selectedVersions={selectedVersions}
+          onToggleVersionSelection={toggleVersionSelection}
+          onGenerate={openRegenerationModal} // Open modal instead of direct generation
+          hasUploadedImage={!!uploadImageBase64}
+          isUploadingToStorage={isUploadingToStorage}
+        />
+      </div>
+
+
+      {/* Scene Text Input for first time generation only */}
+      {(!hasExistingVideos && !legacyVideo) && sceneId !== 'end' && (
+        <div className="space-y-6">
+          <div>
+            <label className="block mb-3">
+              <span className="font-medium text-gray-300">
+                {sceneId === 'cover' ? 'Cover Scene Text' : sceneId === 'music' ? 'Music Prompt' : 'Scene Text'}
+              </span>
+            </label>
+            <textarea
+              value={editableSceneText}
+              onChange={(e) => setEditableSceneText(e.target.value)}
+              className="w-full p-4 bg-gray-800 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition text-gray-300 resize-none"
+              rows={sceneId === 'music' ? 2 : 4}
+              placeholder={
+                sceneId === 'cover' ? 'Cover analysis text from PDF will appear here...' :
+                sceneId === 'music' ? 'Background music prompt from PDF will appear here...' :
+                'Scene text from PDF analysis will appear here...'
+              }
+            />
+          </div>
+        </div>
+      )}
+      </div>
+
+      {/* Regeneration Modal */}
+      <RegenerationModal
+        isOpen={isRegenerationModalOpen}
+        onClose={closeRegenerationModal}
+        sceneId={sceneId}
+        onGenerate={handleModalGenerate}
+        onCancel={handleModalCancel}
+        isGenerating={isUploading}
+        generateButtonText={sceneId === 'music' ? 'Generate Music' : 'Generate Video'}
+      >
+        {/* Generation Preview Panel Content - moved from inline to modal */}
+        <div className="space-y-4">
+          <div className="bg-gray-800 rounded-xl border border-gray-600 space-y-0">
+            {/* Video Prompt Section */}
+            {getCurrentPrompt() && (
+              <>
+                <div className="p-4 border-b border-gray-600">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="text-sm text-gray-400">Video Prompt</div>
+                    <button
+                      onClick={() => {
+                        setIsEditingPrompt(!isEditingPrompt);
+                        if (!isEditingPrompt) {
+                          const currentPrompt = getCurrentPrompt();
+                          setEditedPrompt(currentPrompt);
+                          setOriginalPrompt(currentPrompt);
+                        }
+                      }}
+                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-orange-400 transition-colors"
+                    >
+                      <Pencil size={12} />
+                      {isEditingPrompt ? 'Save' : 'Edit'}
+                    </button>
+                  </div>
+                  
+                  {isEditingPrompt ? (
+                    <textarea
+                      value={editedPrompt}
+                      onChange={(e) => setEditedPrompt(e.target.value)}
+                      onBlur={() => {
+                        // If cleared, restore original
+                        if (!editedPrompt.trim()) {
+                          setEditedPrompt(originalPrompt);
+                        }
+                      }}
+                      className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition text-gray-300 resize-none"
+                      rows={3}
+                      placeholder="Edit video prompt..."
+                    />
+                  ) : (
+                    <div className="text-gray-300 p-3 bg-gray-700 rounded-lg text-sm">
+                      {getCurrentPrompt()}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+            
+            {/* Scene Text Preview/Edit */}
+            <div className="p-4 border-b border-gray-600">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="text-sm text-gray-400">Scene Text</div>
+                <button
+                  onClick={() => {
+                    setIsEditingOriginalText(!isEditingOriginalText);
+                    if (!isEditingOriginalText) {
+                      setEditedOriginalText(calculateFinalText().originalText);
+                    }
+                  }}
+                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-orange-400 transition-colors"
+                >
+                  <Pencil size={12} />
+                  {isEditingOriginalText ? 'Save' : 'Edit'}
+                </button>
+              </div>
+              
+              {isEditingOriginalText ? (
+                <textarea
+                  value={editedOriginalText}
+                  onChange={(e) => setEditedOriginalText(e.target.value)}
+                  className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition text-gray-300 resize-none"
+                  rows={3}
+                  placeholder="Edit scene text..."
+                />
+              ) : (
+                <>
+                  {/* Final Preview with Scene Text */}
+                  <div className="text-gray-300 mb-3 p-3 bg-gray-700 rounded-lg">
+                    "{calculateFinalText().originalText}"
+                  </div>
+                  
+                  {/* Selected Previous Notes */}
+                  {calculateFinalText().selectedPreviousNotes.map((note) => (
+                    <div key={note.id} className="text-blue-300 text-sm mb-2 border-l-2 border-blue-500 pl-3 ml-2">
+                      + {note.text}
+                    </div>
+                  ))}
+                  
+                  {/* New Note Preview */}
+                  {calculateFinalText().newNote && (
+                    <div className="text-emerald-300 text-sm mb-2 border-l-2 border-emerald-500 pl-3 ml-2">
+                      + {calculateFinalText().newNote}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            
+            {/* Previous Notes Checkboxes */}
+            {getAvailableComments().length > 0 && (
+              <div className="p-4 border-b border-gray-600">
+                <div className="text-sm text-gray-400 mb-2">Previous notes:</div>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {getAvailableComments().map((comment) => (
+                    <label
+                      key={comment.id}
+                      className="flex items-center p-2 rounded-lg hover:bg-gray-700 transition-colors cursor-pointer"
+                    >
+                      <span className="text-gray-500 text-xs font-medium min-w-[24px]">
+                        v{comment.version}
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={selectedComments.has(comment.id)}
+                        onChange={(e) => {
+                          const newSelected = new Set(selectedComments);
+                          if (e.target.checked) {
+                            newSelected.add(comment.id);
+                          } else {
+                            newSelected.delete(comment.id);
+                          }
+                          setSelectedComments(newSelected);
+                        }}
+                        className="rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-2 focus:ring-blue-500 mr-2"
+                      />
+                      <div className="flex-1 text-gray-300 text-sm">
+                        {comment.text}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Add New Note Section */}
+            <div className="p-4">
+              {isAddingNewNote ? (
+                <div className="space-y-3">
+                  <textarea
+                    value={newNoteText}
+                    onChange={(e) => setNewNoteText(e.target.value)}
+                    className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:outline-none transition text-gray-300 resize-none"
+                    rows={2}
+                    placeholder="Add new animation note..."
+                    autoFocus
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setIsAddingNewNote(false);
+                        // Keep the note text to show in preview
+                      }}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg transition-colors"
+                    >
+                      <Check size={14} />
+                      Done
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsAddingNewNote(false);
+                        setNewNoteText('');
+                      }}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg transition-colors"
+                    >
+                      <X size={14} />
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsAddingNewNote(true)}
+                  className="flex items-center gap-2 text-sm text-gray-400 hover:text-emerald-400 transition-colors"
+                >
+                  <Plus size={16} />
+                  {newNoteText.trim() ? 'Edit animation note' : 'Add animation note'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </RegenerationModal>
+    </>
+  );
+};
