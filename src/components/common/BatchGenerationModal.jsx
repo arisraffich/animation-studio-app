@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Check, Loader2, AlertTriangle, Play, Download } from './Icons';
+import { X, Check, Loader2, AlertTriangle, Play, Download, ChevronLeft, ChevronRight } from './Icons';
 import { handleDownloadMedia, getDownloadFilename } from '../../utils/downloadUtils';
 
 export const BatchGenerationModal = ({ 
@@ -20,6 +20,7 @@ export const BatchGenerationModal = ({
 }) => {
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
+  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   
   // Download function using shared utility
   const handleDownloadWrapper = async (mediaUrl, pageId, isMusic = false) => {
@@ -29,6 +30,70 @@ export const BatchGenerationModal = ({
     
     await handleDownloadMedia(mediaUrl, filename, mediaType);
   };
+  
+  // Get all videos for navigation
+  const getAllVideosForNavigation = () => {
+    const allVideos = [];
+    pagesArray.forEach(pageId => {
+      const pageScene = project?.scenes?.[pageId];
+      
+      // Check videoVersions array first (new format)
+      const latestVersion = pageScene?.videoVersions?.find(v => v.isLatest && v.prompt?.video_url) 
+                          || pageScene?.videoVersions?.find(v => v.prompt?.video_url);
+      
+      // Check legacy format (direct in scene.prompt)
+      const legacyVideo = pageScene?.prompt?.video_url;
+      
+      const videoUrl = latestVersion?.prompt?.video_url || legacyVideo;
+      
+      if (videoUrl) {
+        const pageName = pageId === 'cover' ? 'Cover' : `Page ${pageId}`;
+        allVideos.push({
+          url: videoUrl,
+          title: pageName,
+          pageId: pageId
+        });
+      }
+    });
+    return allVideos;
+  };
+  
+  // Navigate to next/previous video
+  const navigateVideo = (direction) => {
+    const allVideos = getAllVideosForNavigation();
+    let newIndex;
+    
+    if (direction === 'next') {
+      newIndex = (currentVideoIndex + 1) % allVideos.length;
+    } else {
+      newIndex = currentVideoIndex === 0 ? allVideos.length - 1 : currentVideoIndex - 1;
+    }
+    
+    setCurrentVideoIndex(newIndex);
+    setSelectedVideo(allVideos[newIndex]);
+  };
+  
+  // Keyboard navigation for video modal
+  useEffect(() => {
+    if (!isVideoModalOpen) return;
+    
+    const handleKeyPress = (e) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        navigateVideo('prev');
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        navigateVideo('next');
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setIsVideoModalOpen(false);
+        setSelectedVideo(null);
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyPress);
+    return () => document.removeEventListener('keydown', handleKeyPress);
+  }, [isVideoModalOpen, currentVideoIndex]);
   
   if (!isOpen) return null;
 
@@ -107,6 +172,11 @@ export const BatchGenerationModal = ({
 
             const handlePlayVideo = () => {
               if (hasVideo && videoObject) {
+                // Find all pages with videos for navigation
+                const allVideos = getAllVideosForNavigation();
+                const videoIndex = allVideos.findIndex(v => v.pageId === pageId);
+                
+                setCurrentVideoIndex(videoIndex);
                 setSelectedVideo({
                   url: videoUrl,
                   title: pageName,
@@ -255,65 +325,107 @@ export const BatchGenerationModal = ({
         )}
       </div>
       
-      {/* Video Preview Modal */}
-      {isVideoModalOpen && selectedVideo && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="relative max-w-4xl w-full mx-4 bg-gray-900 rounded-2xl overflow-hidden">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-700">
-              <h3 className="text-lg font-semibold text-white">{selectedVideo.title} - Video Preview</h3>
-              <button
-                onClick={() => {
-                  setIsVideoModalOpen(false);
-                  setSelectedVideo(null);
-                }}
-                className="text-gray-400 hover:text-white transition-colors p-1"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            
-            {/* Video Player */}
-            <div className="aspect-video bg-black">
-              <video
-                src={selectedVideo.url}
-                controls
-                autoPlay
-                className="w-full h-full"
-                onError={(e) => {
-                  console.error('Video playback error:', e);
-                }}
-              >
-                Your browser does not support video playback.
-              </video>
-            </div>
-            
-            {/* Modal Footer */}
-            <div className="p-4 bg-gray-800/50">
-              <div className="flex items-center justify-between">
+      {/* Video Preview Modal with Navigation */}
+      {isVideoModalOpen && selectedVideo && (() => {
+        const allVideos = getAllVideosForNavigation();
+        const hasMultipleVideos = allVideos.length > 1;
+        const currentPosition = currentVideoIndex + 1;
+        
+        return (
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center">
+            <div className="relative max-w-4xl w-full mx-4 bg-gray-900 rounded-2xl overflow-hidden">
+              {/* Modal Header with Navigation Info */}
+              <div className="flex items-center justify-between p-4 border-b border-gray-700">
                 <div>
-                  <p className="text-sm text-gray-400">
-                    Generated video for {selectedVideo.title}
-                  </p>
+                  <h3 className="text-lg font-semibold text-white">{selectedVideo.title} - Video Preview</h3>
+                  {hasMultipleVideos && (
+                    <p className="text-sm text-gray-400">{currentPosition} of {allVideos.length} videos</p>
+                  )}
                 </div>
-                <div className="flex items-center gap-3">
-                  {/* Download button */}
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await handleDownloadWrapper(selectedVideo.url, selectedVideo.pageId, false);
+                <button
+                  onClick={() => {
+                    setIsVideoModalOpen(false);
+                    setSelectedVideo(null);
+                  }}
+                  className="text-gray-400 hover:text-white transition-colors p-1"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              
+              {/* Video Player with Navigation */}
+              <div className="relative">
+                <div className="aspect-video bg-black">
+                  <video
+                    key={selectedVideo.url} // Force re-render on video change
+                    src={selectedVideo.url}
+                    controls
+                    autoPlay
+                    className="w-full h-full"
+                    onError={(e) => {
+                      console.error('Video playback error:', e);
                     }}
-                    className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full transition-colors duration-200"
-                    title="Download video"
                   >
-                    <Download size={16} />
-                  </button>
+                    Your browser does not support video playback.
+                  </video>
+                </div>
+                
+                {/* Navigation Arrows */}
+                {hasMultipleVideos && (
+                  <>
+                    {/* Previous Button */}
+                    <button
+                      onClick={() => navigateVideo('prev')}
+                      className="absolute left-4 top-1/2 transform -translate-y-1/2 bg-black/60 hover:bg-black/80 text-white p-3 rounded-full transition-all duration-200 hover:scale-110"
+                      title="Previous video"
+                    >
+                      <ChevronLeft size={24} />
+                    </button>
+                    
+                    {/* Next Button */}
+                    <button
+                      onClick={() => navigateVideo('next')}
+                      className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-black/60 hover:bg-black/80 text-white p-3 rounded-full transition-all duration-200 hover:scale-110"
+                      title="Next video"
+                    >
+                      <ChevronRight size={24} />
+                    </button>
+                  </>
+                )}
+              </div>
+              
+              {/* Modal Footer */}
+              <div className="p-4 bg-gray-800/50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-400">
+                      Generated video for {selectedVideo.title}
+                    </p>
+                    {hasMultipleVideos && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Use arrow keys or buttons to navigate between videos
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {/* Download button */}
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await handleDownloadWrapper(selectedVideo.url, selectedVideo.pageId, false);
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full transition-colors duration-200"
+                      title="Download video"
+                    >
+                      <Download size={16} />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

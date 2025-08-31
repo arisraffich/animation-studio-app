@@ -1182,9 +1182,18 @@ export const ProgressiveVideoGrid = ({
     setSelectedComments(new Set());
   };
 
-  const handleModalGenerate = () => {
-    handleGenerate();
-    // Modal will close in handleGenerate success
+  const handleModalGenerate = async () => {
+    try {
+      // Close modal immediately when generation starts
+      closeRegenerationModal();
+      
+      // Start generation
+      await handleGenerate();
+    } catch (error) {
+      // If generation fails, reopen the modal
+      console.error('Generation failed:', error);
+      setIsRegenerationModalOpen(true);
+    }
   };
 
   const handleModalCancel = () => {
