@@ -141,7 +141,30 @@ export const BatchGenerationModal = ({
                 <div className="text-center">
                   <div className="mb-2 flex justify-center">
                     {isCompleted ? (
-                      <Check size={20} className="text-green-400" />
+                      // Show play/download buttons instead of check mark
+                      hasVideo ? (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handlePlayVideo}
+                            className="bg-green-600 hover:bg-green-700 text-white p-2 rounded-full transition-colors shadow-lg"
+                            title="Preview video"
+                          >
+                            <Play size={16} />
+                          </button>
+                          <button
+                            onClick={handleDownloadVideo}
+                            className={`${wasAutoDownloaded 
+                              ? 'bg-green-600 hover:bg-green-700' 
+                              : 'bg-blue-600 hover:bg-blue-700'
+                            } text-white p-2 rounded-full transition-colors shadow-lg`}
+                            title={wasAutoDownloaded ? "Auto-downloaded ✓ (click to download again)" : "Download video"}
+                          >
+                            <Download size={16} />
+                          </button>
+                        </div>
+                      ) : (
+                        <Check size={20} className="text-green-400" />
+                      )
                     ) : isCurrent ? (
                       <Loader2 size={20} className="animate-spin text-blue-400" />
                     ) : isRetrying ? (
@@ -163,29 +186,6 @@ export const BatchGenerationModal = ({
                     <p className="text-xs mt-1 opacity-75">Failed</p>
                   )}
                 </div>
-                
-                {/* Play and Download buttons for completed videos */}
-                {hasVideo && (
-                  <div className="absolute top-2 right-2 flex gap-1">
-                    <button
-                      onClick={handlePlayVideo}
-                      className="bg-green-600 hover:bg-green-700 text-white p-1.5 rounded-full transition-colors shadow-lg"
-                      title="Preview video"
-                    >
-                      <Play size={12} />
-                    </button>
-                    <button
-                      onClick={handleDownloadVideo}
-                      className={`${wasAutoDownloaded 
-                        ? 'bg-green-600 hover:bg-green-700' 
-                        : 'bg-blue-600 hover:bg-blue-700'
-                      } text-white p-1.5 rounded-full transition-colors shadow-lg`}
-                      title={wasAutoDownloaded ? "Auto-downloaded ✓ (click to download again)" : "Download video"}
-                    >
-                      <Download size={12} />
-                    </button>
-                  </div>
-                )}
               </div>
             );
           })}
