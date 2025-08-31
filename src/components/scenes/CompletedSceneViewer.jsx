@@ -21,6 +21,7 @@ export const CompletedSceneViewer = ({ sceneId, project, updateProject, setCurre
   const [failedBatchPages, setFailedBatchPages] = useState([]);
   const [retryingBatchPages, setRetryingBatchPages] = useState([]);
   const [batchError, setBatchError] = useState('');
+  const [estimatedTime, setEstimatedTime] = useState('');
   const batchCancelledRef = useRef(false);
   const batchAbortControllerRef = useRef(null);
   const [autoDownloadedPages, setAutoDownloadedPages] = useState(new Set());
@@ -458,7 +459,7 @@ export const CompletedSceneViewer = ({ sceneId, project, updateProject, setCurre
         retryingPages={retryingBatchPages}
         isGenerating={batchGenerating}
         currentPageName={currentBatchPage === 'cover' ? 'Cover' : `Page ${currentBatchPage}`}
-        estimatedTimeRemaining=""
+        estimatedTimeRemaining={estimatedTime}
         error={batchError}
         project={project}
         autoDownloadedPages={autoDownloadedPages}
