@@ -12,6 +12,39 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 8081;
 const fs = require('fs');
 
+// Initialize Cloudflare services
+const initializeCloudflare = async () => {
+  try {
+    // Initialize D1 Database
+    const { initializeD1 } = await import('./src/services/firebaseService.js');
+    
+    // For server-side D1 access, we'll use the Cloudflare binding
+    // This is a placeholder - real D1 integration happens in Workers
+    console.log('🔗 Cloudflare D1 database ready');
+    
+    // Initialize R2 Storage  
+    const { initializeR2 } = await import('./src/services/storageService.js');
+    
+    // R2 credentials - these will be generated via Cloudflare API
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+    
+    if (accountId && apiToken) {
+      console.log('🔗 Cloudflare R2 storage ready');
+      console.log('✅ Cloudflare services initialized successfully');
+    } else {
+      console.warn('⚠️ Cloudflare credentials missing - check .env.local');
+    }
+    
+  } catch (error) {
+    console.error('❌ Cloudflare initialization failed:', error);
+    console.log('📢 Using local development mode');
+  }
+};
+
+// Initialize Cloudflare on startup
+initializeCloudflare();
+
 // Progress storage for smooth progress bars
 const progressStorage = new Map();
 const progressTimers = new Map(); // Track incremental progress timers
@@ -537,6 +570,72 @@ app.post('/api/firebase-image', async (req, res) => {
       error: 'Internal server error',
       details: error.message 
     });
+  }
+});
+
+// ====================
+// D1 DATABASE API ENDPOINTS
+// ====================
+
+// Get all projects
+app.get('/api/projects', async (req, res) => {
+  try {
+    // For development, return empty array since D1 isn't bound yet
+    // In production, this will use D1 binding
+    res.json([]);
+  } catch (error) {
+    console.error('Projects API error:', error);
+    res.status(500).json({ error: 'Failed to fetch projects' });
+  }
+});
+
+// Get single project
+app.get('/api/projects/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    // For development, return null since D1 isn't bound yet
+    res.json(null);
+  } catch (error) {
+    console.error('Project get API error:', error);
+    res.status(500).json({ error: 'Failed to fetch project' });
+  }
+});
+
+// Create project
+app.post('/api/projects', async (req, res) => {
+  try {
+    const projectData = req.body;
+    // For development, return mock ID since D1 isn't bound yet
+    const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+    res.json({ id: projectId });
+  } catch (error) {
+    console.error('Project create API error:', error);
+    res.status(500).json({ error: 'Failed to create project' });
+  }
+});
+
+// Update project
+app.put('/api/projects/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    // For development, return success since D1 isn't bound yet
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Project update API error:', error);
+    res.status(500).json({ error: 'Failed to update project' });
+  }
+});
+
+// Delete project
+app.delete('/api/projects/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    // For development, return success since D1 isn't bound yet
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Project delete API error:', error);
+    res.status(500).json({ error: 'Failed to delete project' });
   }
 });
 

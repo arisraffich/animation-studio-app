@@ -1,0 +1,18 @@
+name = "animation-studio"
+main = "server.cjs"
+compatibility_date = "2025-08-31"
+
+# D1 Database Configuration
+[[d1_databases]]
+binding = "animation_studio_db"
+database_name = "animation-studio-db"
+database_id = "d5719528-a7c4-462a-929a-1ee80da2055b"
+
+# R2 Storage Configuration
+[[r2_buckets]]
+binding = "animation_studio_storage"
+bucket_name = "animation-studio-storage"
+
+# Environment variables (will be added later)
+[vars]
+NODE_ENV = "production"

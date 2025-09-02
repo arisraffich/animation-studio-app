@@ -7,8 +7,7 @@ import { Pencil, Plus, X, Check } from '../common/Icons';
 import { uploadImageFromBase64, deleteVersionImage, uploadMusicFromBlob, deleteVersionMusic } from '../../services/storageService';
 import { websocketService } from '../../services/websocketService';
 import { getProject, updateProject } from '../../services/firebaseService';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../services/firebase';
+// Cloudflare D1 database operations handled via server API
 
 export const ProgressiveVideoGrid = ({ 
   sceneId, 
