@@ -1,5 +1,5 @@
-name = "animation-studio"
-main = "server.cjs"
+name = "animation-studio-api"
+main = "worker.js"
 compatibility_date = "2025-08-31"
 
 # D1 Database Configuration
@@ -13,6 +13,6 @@ database_id = "5a9f4f07-f0e5-43ec-b84f-9350206a9469"
 binding = "animation_studio_storage"
 bucket_name = "animation-studio-storage"
 
-# Environment variables (will be added later)
+# Environment variables for Workers
 [vars]
 NODE_ENV = "production"
