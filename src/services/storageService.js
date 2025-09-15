@@ -4,9 +4,90 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
+// D1 Database client
+let d1Client = null;
+
 // R2 Client configuration (server-side only)
 let r2Client = null;
 const BUCKET_NAME = 'animation-studio-storage';
+
+// Initialize D1 Database client
+export const initializeD1 = async (accountId, databaseId) => {
+  try {
+    // Create a D1 client that uses the Cloudflare API
+    d1Client = {
+      accountId,
+      databaseId,
+      apiToken: process.env.CLOUDFLARE_API_TOKEN,
+      
+      // D1 methods that make actual API calls
+      prepare: (sql) => {
+        const preparedStatement = {
+          bind: (...params) => ({
+            all: async () => {
+              // Make API call to Cloudflare D1
+              const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  sql: sql,
+                  params: params
+                })
+              });
+              
+              const data = await response.json();
+              return { results: data.result || [] };
+            },
+            first: async () => {
+              const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  sql: sql,
+                  params: params
+                })
+              });
+              
+              const data = await response.json();
+              const results = data.result || [];
+              return results[0] || null;
+            },
+            run: async () => {
+              const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  sql: sql,
+                  params: params
+                })
+              });
+              
+              const data = await response.json();
+              console.log('D1 API Response:', data);
+              return { success: data.success || false };
+            }
+          })
+        };
+        return preparedStatement;
+      }
+    };
+    
+    console.log('🔗 Cloudflare D1 database ready');
+    return d1Client;
+  } catch (error) {
+    console.error('❌ D1 initialization failed:', error);
+    throw error;
+  }
+};
 
 // Initialize R2 client (server-side)
 export const initializeR2 = (accountId, accessKeyId, secretAccessKey) => {

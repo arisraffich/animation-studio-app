@@ -1,0 +1,13 @@
+
+> aura@1.0.5 dev
+> vite --port 5173
+
+
+  VITE v5.4.19  ready in 89 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+Sending Request to the Target: GET /api/projects
+Received Response from the Target: 500 /api/projects
+Sending Request to the Target: GET /api/projects
+Received Response from the Target: 500 /api/projects

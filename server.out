@@ -1,0 +1,23 @@
+
+> aura@1.0.5 server
+> node server.cjs
+
+[dotenv@17.2.1] injecting env (16) from .env.local -- tip: 📡 observe env with Radar: https://dotenvx.com/radar
+Server running on port 8081
+WebSocket server running on port 8081
+Dist folder exists: true
+Assets folder exists: true
+Dist contents: [ '.DS_Store', 'assets', 'index.html' ]
+Assets contents: [
+  'index-CGj45z7a.css',
+  'index-Omgrtfs9.js',
+  'pdf-l0sNRNKZ.js',
+  'simpleStorageDeletion-HxFWNnfa.js',
+  'vendor-nf7bT_Uh.js'
+]
+🔍 Debug - Cloudflare env vars: { accountId: 'SET', apiToken: 'SET', databaseId: 'SET' }
+🔗 Cloudflare D1 database ready
+🔗 Cloudflare D1 database ready
+🔗 Cloudflare R2 storage ready
+✅ Cloudflare services initialized successfully
+GET /api/test-r2

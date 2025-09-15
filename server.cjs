@@ -16,24 +16,35 @@ const fs = require('fs');
 const initializeCloudflare = async () => {
   try {
     // Initialize D1 Database
-    const { initializeD1 } = await import('./src/services/firebaseService.js');
-    
-    // For server-side D1 access, we'll use the Cloudflare binding
-    // This is a placeholder - real D1 integration happens in Workers
-    console.log('🔗 Cloudflare D1 database ready');
+    const { initializeD1 } = await import('./src/services/storageService.js');
     
     // Initialize R2 Storage  
     const { initializeR2 } = await import('./src/services/storageService.js');
     
-    // R2 credentials - these will be generated via Cloudflare API
+    // Cloudflare credentials
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+    const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
     
-    if (accountId && apiToken) {
+    console.log('🔍 Debug - Cloudflare env vars:', {
+      accountId: accountId ? 'SET' : 'MISSING',
+      apiToken: apiToken ? 'SET' : 'MISSING', 
+      databaseId: databaseId ? 'SET' : 'MISSING'
+    });
+    
+    if (accountId && apiToken && databaseId) {
+      // Initialize D1 Database
+      await initializeD1(accountId, databaseId);
+      
+      // Initialize R2 Storage (will need access keys later)
+      // await initializeR2(accountId, accessKeyId, secretAccessKey);
+      
+      console.log('🔗 Cloudflare D1 database ready');
       console.log('🔗 Cloudflare R2 storage ready');
       console.log('✅ Cloudflare services initialized successfully');
     } else {
       console.warn('⚠️ Cloudflare credentials missing - check .env.local');
+      console.log('Missing:', { accountId: !!accountId, apiToken: !!apiToken, databaseId: !!databaseId });
     }
     
   } catch (error) {
@@ -574,15 +585,64 @@ app.post('/api/firebase-image', async (req, res) => {
 });
 
 // ====================
-// D1 DATABASE API ENDPOINTS
+// FIREBASE DATABASE API ENDPOINTS
 // ====================
+
+// Import Firebase (using dynamic import since this is CommonJS)
+let db;
+const initFirebase = async () => {
+  try {
+    const { initializeApp } = await import('firebase/app');
+    const { getFirestore, collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc } = await import('firebase/firestore');
+    
+    const firebaseConfig = {
+      apiKey: process.env.VITE_FIREBASE_API_KEY,
+      authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
+      projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+      storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+      appId: process.env.VITE_FIREBASE_APP_ID
+    };
+
+    const app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+    console.log('🔥 Firebase initialized successfully');
+    return { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc };
+  } catch (error) {
+    console.error('❌ Firebase initialization failed:', error);
+    throw error;
+  }
+};
 
 // Get all projects
 app.get('/api/projects', async (req, res) => {
   try {
-    // For development, return empty array since D1 isn't bound yet
-    // In production, this will use D1 binding
-    res.json([]);
+    // Use Cloudflare D1 instead of Firebase
+    const { initializeD1 } = await import('./src/services/storageService.js');
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
+    
+    if (!accountId || !databaseId) {
+      throw new Error('Cloudflare credentials not configured');
+    }
+    
+    const d1 = await initializeD1(accountId, databaseId);
+    const result = await d1.prepare('SELECT * FROM projects ORDER BY created_at DESC').bind().all();
+    
+    // Convert D1 results to match Firebase format
+    const projects = result.results.map(row => ({
+      id: row.id,
+      name: row.name,
+      author: row.author,
+      storyText: row.story_text,
+      totalPages: row.total_pages,
+      scenes: row.scenes ? JSON.parse(row.scenes) : {},
+      pageDimensions: row.page_dimensions ? JSON.parse(row.page_dimensions) : null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+    
+    res.json(projects);
   } catch (error) {
     console.error('Projects API error:', error);
     res.status(500).json({ error: 'Failed to fetch projects' });
@@ -593,8 +653,36 @@ app.get('/api/projects', async (req, res) => {
 app.get('/api/projects/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    // For development, return null since D1 isn't bound yet
-    res.json(null);
+    
+    // Use Cloudflare D1 instead of Firebase
+    const { initializeD1 } = await import('./src/services/storageService.js');
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
+    
+    if (!accountId || !databaseId) {
+      throw new Error('Cloudflare credentials not configured');
+    }
+    
+    const d1 = await initializeD1(accountId, databaseId);
+    const result = await d1.prepare('SELECT * FROM projects WHERE id = ?').bind(id).first();
+    
+    if (result) {
+      // Convert D1 result to match Firebase format
+      const project = {
+        id: result.id,
+        name: result.name,
+        author: result.author,
+        storyText: result.story_text,
+        totalPages: result.total_pages,
+        scenes: result.scenes ? JSON.parse(result.scenes) : {},
+        pageDimensions: result.page_dimensions ? JSON.parse(result.page_dimensions) : null,
+        createdAt: result.created_at,
+        updatedAt: result.updated_at
+      };
+      res.json(project);
+    } else {
+      res.json(null);
+    }
   } catch (error) {
     console.error('Project get API error:', error);
     res.status(500).json({ error: 'Failed to fetch project' });
@@ -605,9 +693,40 @@ app.get('/api/projects/:id', async (req, res) => {
 app.post('/api/projects', async (req, res) => {
   try {
     const projectData = req.body;
-    // For development, return mock ID since D1 isn't bound yet
-    const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(2)}`;
-    res.json({ id: projectId });
+    
+    // Use Cloudflare D1 instead of Firebase
+    const { initializeD1 } = await import('./src/services/storageService.js');
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
+    
+    if (!accountId || !databaseId) {
+      throw new Error('Cloudflare credentials not configured');
+    }
+    
+    const d1 = await initializeD1(accountId, databaseId);
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    
+    const result = await d1.prepare(`
+      INSERT INTO projects (id, name, author, story_text, total_pages, scenes, page_dimensions, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      id,
+      projectData.name || 'Untitled Project',
+      projectData.author || 'Unknown Author',
+      projectData.storyText || '',
+      projectData.totalPages || 0,
+      JSON.stringify(projectData.scenes || {}),
+      JSON.stringify(projectData.pageDimensions || null),
+      now,
+      now
+    ).run();
+    
+    if (result.success) {
+      res.json({ id });
+    } else {
+      throw new Error('Failed to create project in database');
+    }
   } catch (error) {
     console.error('Project create API error:', error);
     res.status(500).json({ error: 'Failed to create project' });
@@ -619,8 +738,53 @@ app.put('/api/projects/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
-    // For development, return success since D1 isn't bound yet
-    res.json({ success: true });
+    
+    // Use Cloudflare D1 instead of Firebase
+    const { initializeD1 } = await import('./src/services/storageService.js');
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
+    
+    if (!accountId || !databaseId) {
+      throw new Error('Cloudflare credentials not configured');
+    }
+    
+    const d1 = await initializeD1(accountId, databaseId);
+    const now = new Date().toISOString();
+    const updateFields = [];
+    const updateValues = [];
+    
+    // Handle different field mappings
+    Object.keys(updates).forEach(key => {
+      if (key === 'scenes' || key === 'pageDimensions') {
+        updateFields.push(`${key === 'scenes' ? 'scenes' : 'page_dimensions'} = ?`);
+        updateValues.push(JSON.stringify(updates[key]));
+      } else if (key === 'storyText') {
+        updateFields.push('story_text = ?');
+        updateValues.push(updates[key]);
+      } else if (key === 'totalPages') {
+        updateFields.push('total_pages = ?');
+        updateValues.push(updates[key]);
+      } else {
+        updateFields.push(`${key} = ?`);
+        updateValues.push(updates[key]);
+      }
+    });
+    
+    updateFields.push('updated_at = ?');
+    updateValues.push(now);
+    updateValues.push(id);
+    
+    const result = await d1.prepare(`
+      UPDATE projects 
+      SET ${updateFields.join(', ')} 
+      WHERE id = ?
+    `).bind(...updateValues).run();
+    
+    if (result.success) {
+      res.json({ success: true });
+    } else {
+      throw new Error('Failed to update project in database');
+    }
   } catch (error) {
     console.error('Project update API error:', error);
     res.status(500).json({ error: 'Failed to update project' });
@@ -631,8 +795,24 @@ app.put('/api/projects/:id', async (req, res) => {
 app.delete('/api/projects/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    // For development, return success since D1 isn't bound yet
-    res.json({ success: true });
+    
+    // Use Cloudflare D1 instead of Firebase
+    const { initializeD1 } = await import('./src/services/storageService.js');
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
+    
+    if (!accountId || !databaseId) {
+      throw new Error('Cloudflare credentials not configured');
+    }
+    
+    const d1 = await initializeD1(accountId, databaseId);
+    const result = await d1.prepare('DELETE FROM projects WHERE id = ?').bind(id).run();
+    
+    if (result.success) {
+      res.json({ success: true });
+    } else {
+      throw new Error('Failed to delete project from database');
+    }
   } catch (error) {
     console.error('Project delete API error:', error);
     res.status(500).json({ error: 'Failed to delete project' });

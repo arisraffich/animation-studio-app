@@ -6,7 +6,7 @@ compatibility_date = "2025-08-31"
 [[d1_databases]]
 binding = "animation_studio_db"
 database_name = "animation-studio-db"
-database_id = "d5719528-a7c4-462a-929a-1ee80da2055b"
+database_id = "5a9f4f07-f0e5-43ec-b84f-9350206a9469"
 
 # R2 Storage Configuration
 [[r2_buckets]]
