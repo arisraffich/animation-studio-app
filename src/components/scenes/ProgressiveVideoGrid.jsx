@@ -311,7 +311,8 @@ export const ProgressiveVideoGrid = ({
     if (imageToUse === 'FETCH_REQUIRED') {
       setLoadingMessage('Loading stored image...');
       try {
-        const response = await fetch('/api/firebase-image', {
+        const apiUrl = import.meta.env.VITE_API_URL || '/api';
+        const response = await fetch(`${apiUrl}/api/firebase-image`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imageUrl: storedImageData.url })

@@ -198,16 +198,34 @@ export const deleteImage = async (imagePath) => {
  */
 export const uploadImageFromBase64 = async (projectId, sceneId, versionId, base64String, metadata = {}) => {
   try {
-    // Convert base64 to blob
-    const byteCharacters = atob(base64String);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: 'image/jpeg' });
+    const apiUrl = import.meta.env.VITE_API_URL || '/api';
+    const fileName = `${sceneId}/${versionId}.png`;
     
-    return await uploadImage(projectId, sceneId, versionId, blob, metadata);
+    const response = await fetch(`${apiUrl}/api/r2-upload`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        projectId,
+        imageData: base64String,
+        fileName
+      })
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`R2 upload failed: ${errorData.error || response.statusText}`);
+    }
+    
+    const result = await response.json();
+    console.log('✅ R2 image uploaded successfully:', result.imageUrl);
+    
+    return {
+      imageUrl: result.imageUrl,
+      key: result.key,
+      success: true
+    };
   } catch (error) {
     console.error('R2 uploadImageFromBase64 failed:', error);
     throw error;

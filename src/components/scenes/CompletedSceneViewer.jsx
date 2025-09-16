@@ -204,7 +204,8 @@ export const CompletedSceneViewer = ({ sceneId, project, updateProject, setCurre
     
     try {
       // Fetch image from Firebase Storage and convert to base64
-      const imageResponse = await fetch('/api/firebase-image', {
+      const apiUrl = import.meta.env.VITE_API_URL || '/api';
+      const imageResponse = await fetch(`${apiUrl}/api/firebase-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl: scene.storedImage.url })
@@ -297,7 +298,8 @@ export const CompletedSceneViewer = ({ sceneId, project, updateProject, setCurre
       console.error(`Video generation failed for page ${pageId}:`, error.message);
       
       // Fetch image for fallback too
-      const imageResponse = await fetch('/api/firebase-image', {
+      const apiUrl = import.meta.env.VITE_API_URL || '/api';
+      const imageResponse = await fetch(`${apiUrl}/api/firebase-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl: scene.storedImage.url })

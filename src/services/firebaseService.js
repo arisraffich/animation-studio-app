@@ -8,7 +8,7 @@
 export const getAllProjects = async () => {
   try {
     const apiUrl = import.meta.env.VITE_API_URL || '/api';
-    const response = await fetch(`${apiUrl}/projects`);
+    const response = await fetch(`${apiUrl}/api/projects`);
     if (!response.ok) {
       throw new Error(`API error: ${response.status}`);
     }
@@ -22,7 +22,7 @@ export const getAllProjects = async () => {
 export const getProject = async (projectId) => {
   try {
     const apiUrl = import.meta.env.VITE_API_URL || '/api';
-    const response = await fetch(`${apiUrl}/projects/${projectId}`);
+    const response = await fetch(`${apiUrl}/api/projects/${projectId}`);
     if (!response.ok) {
       throw new Error(`API error: ${response.status}`);
     }
@@ -36,7 +36,7 @@ export const getProject = async (projectId) => {
 export const createProject = async (projectData) => {
   try {
     const apiUrl = import.meta.env.VITE_API_URL || '/api';
-    const response = await fetch(`${apiUrl}/projects`, {
+    const response = await fetch(`${apiUrl}/api/projects`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -59,7 +59,7 @@ export const createProject = async (projectData) => {
 export const updateProject = async (projectId, updates) => {
   try {
     const apiUrl = import.meta.env.VITE_API_URL || '/api';
-    const response = await fetch(`${apiUrl}/projects/${projectId}`, {
+    const response = await fetch(`${apiUrl}/api/projects/${projectId}`, {
       method: 'PUT', 
       headers: {
         'Content-Type': 'application/json',
@@ -82,7 +82,7 @@ export const deleteProject = async (projectId) => {
   try {
     // Delete from database
     const apiUrl = import.meta.env.VITE_API_URL || '/api';
-    const response = await fetch(`${apiUrl}/projects/${projectId}`, {
+    const response = await fetch(`${apiUrl}/api/projects/${projectId}`, {
       method: 'DELETE'
     });
     

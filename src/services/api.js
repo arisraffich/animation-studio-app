@@ -67,7 +67,8 @@ Examples by story type:
   };
 
   try {
-    const response = await fetch('/api/openai', {
+    const apiUrl = import.meta.env.VITE_API_URL || '/api';
+    const response = await fetch(`${apiUrl}/api/openai`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -506,7 +507,8 @@ export const generateSeedancePrompt = async (project, sceneId, imageBase64, feed
   };
 
   try {
-    const response = await fetch('/api/openai', {
+    const apiUrl = import.meta.env.VITE_API_URL || '/api';
+    const response = await fetch(`${apiUrl}/api/openai`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -579,7 +581,8 @@ export const analyzeCover = async (imageBase64, setError) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 45000); // 45 second timeout for cover analysis
     
-    const response = await fetch('/api/openai', {
+    const apiUrl = import.meta.env.VITE_API_URL || '/api';
+    const response = await fetch(`${apiUrl}/api/openai`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -646,7 +649,8 @@ export const generateScene = async (project, sceneId, imageBase64, feedback, set
   };
 
   try {
-    const response = await fetch('/api/openai', {
+    const apiUrl = import.meta.env.VITE_API_URL || '/api';
+    const response = await fetch(`${apiUrl}/api/openai`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

@@ -322,7 +322,8 @@ export const LayoutUploader = ({ project, updateProject, setCurrentSceneId, setE
       };
       
       // Fetch image from Firebase Storage for GPT-5 analysis
-      const imageResponse = await fetch('/api/firebase-image', {
+      const apiUrl = import.meta.env.VITE_API_URL || '/api';
+      const imageResponse = await fetch(`${apiUrl}/api/firebase-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl: coverStorageData.url })
