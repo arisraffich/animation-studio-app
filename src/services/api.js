@@ -62,7 +62,7 @@ Examples by story type:
         schema: storyContentSchema.schema
       }
     },
-    max_output_tokens: 4000,
+    max_output_tokens: 8000,  // Increased to handle larger PDFs with many pages
     reasoning: { "effort": "minimal" }  // Reduce reasoning effort for speed
   };
 
@@ -86,8 +86,10 @@ Examples by story type:
       const messageOutput = result.output.find(output => output.type === 'message');
       
       if (messageOutput && messageOutput.content && messageOutput.content[0] && messageOutput.content[0].text) {
+        const responseText = messageOutput.content[0].text;
+        
         try {
-          const parsedJson = JSON.parse(messageOutput.content[0].text);
+          const parsedJson = JSON.parse(responseText);
           
           // Return exactly the story pages GPT-5 identified - no reconstruction needed
           
@@ -98,8 +100,121 @@ Examples by story type:
           };
         } catch (parseError) {
           console.error('JSON parsing failed:', parseError.message);
-          console.error('Failed at character position:', parseError.message.match(/column (\d+)/)?.[1] || 'unknown');
-          throw new Error(`GPT-5 returned malformed JSON: ${parseError.message}`);
+          const errorColumn = parseError.message.match(/column (\d+)/)?.[1] || 'unknown';
+          console.error('Failed at character position:', errorColumn);
+          
+          // Log response details for debugging
+          console.error('Response text length:', responseText.length);
+          console.error('Response text preview (first 200 chars):', responseText.substring(0, 200));
+          console.error('Response text preview (last 200 chars):', responseText.substring(Math.max(0, responseText.length - 200)));
+          
+          // Check if response appears truncated
+          const isTruncated = !responseText.trim().endsWith('}');
+          if (isTruncated) {
+            console.error('Response appears to be truncated - JSON does not end properly');
+          }
+          
+          // Try to fix common JSON issues (truncation, unclosed strings)
+          try {
+            let fixedText = responseText.trim();
+            const errorPos = errorColumn && parseInt(errorColumn) > 0 ? parseInt(errorColumn) - 1 : fixedText.length;
+            
+            // Strategy 1: Try to extract valid partial JSON by finding the last complete object/array
+            // Look for the last complete closing brace
+            let lastCompletePos = fixedText.lastIndexOf('}');
+            if (lastCompletePos > 0) {
+              // Try to parse from start to this position, adding closing brackets/braces as needed
+              let candidateText = fixedText.substring(0, lastCompletePos + 1);
+              
+              // Count structure delimiters in candidate text
+              const openBraces = (candidateText.match(/\{/g) || []).length;
+              const closeBraces = (candidateText.match(/\}/g) || []).length;
+              const openBrackets = (candidateText.match(/\[/g) || []).length;
+              const closeBrackets = (candidateText.match(/\]/g) || []).length;
+              
+              // Close any unclosed structures
+              for (let i = 0; i < openBrackets - closeBrackets; i++) {
+                candidateText += ']';
+              }
+              for (let i = 0; i < openBraces - closeBraces; i++) {
+                candidateText += '}';
+              }
+              
+              try {
+                const partialJson = JSON.parse(candidateText);
+                console.log('Successfully parsed partial JSON (truncated response)');
+                return {
+                  story_pages: partialJson.story_pages || [],
+                  end_scene_elements: partialJson.end_scene_elements || {},
+                  background_music_prompt: partialJson.background_music_prompt || ''
+                };
+              } catch (e) {
+                // Partial parse failed, continue to next strategy
+              }
+            }
+            
+            // Strategy 2: Try to fix unclosed strings by finding and closing them
+            // Find position where we are inside an unclosed string
+            let beforeError = fixedText.substring(0, Math.min(errorPos, fixedText.length));
+            let quoteCount = 0;
+            let inString = false;
+            let escapeNext = false;
+            
+            for (let i = 0; i < beforeError.length; i++) {
+              const char = beforeError[i];
+              if (escapeNext) {
+                escapeNext = false;
+                continue;
+              }
+              if (char === '\\') {
+                escapeNext = true;
+                continue;
+              }
+              if (char === '"') {
+                inString = !inString;
+                quoteCount++;
+              }
+            }
+            
+            // If we're in a string at the error position, try to close it
+            if (inString && errorPos < fixedText.length) {
+              // Insert closing quote and continue
+              fixedText = fixedText.substring(0, errorPos) + '"' + fixedText.substring(errorPos);
+              
+              // Now try to close all structures
+              const openBraces = (fixedText.match(/\{/g) || []).length;
+              const closeBraces = (fixedText.match(/\}/g) || []).length;
+              const openBrackets = (fixedText.match(/\[/g) || []).length;
+              const closeBrackets = (fixedText.match(/\]/g) || []).length;
+              
+              for (let i = 0; i < openBrackets - closeBrackets; i++) {
+                fixedText += ']';
+              }
+              for (let i = 0; i < openBraces - closeBraces; i++) {
+                fixedText += '}';
+              }
+              
+              const fixedJson = JSON.parse(fixedText);
+              console.log('Successfully parsed JSON after fixing unclosed string');
+              return {
+                story_pages: fixedJson.story_pages || [],
+                end_scene_elements: fixedJson.end_scene_elements || {},
+                background_music_prompt: fixedJson.background_music_prompt || ''
+              };
+            }
+            
+            // Strategy 3: If all else fails, throw detailed error
+            throw new Error('Could not repair JSON');
+          } catch (fixError) {
+            console.error('Failed to fix JSON:', fixError.message);
+            // Provide detailed error with actionable advice
+            throw new Error(
+              `GPT-5 returned malformed JSON (likely truncated at position ${errorColumn}): ${parseError.message}. ` +
+              `Response length: ${responseText.length} characters. ` +
+              `This usually happens when the PDF has too many pages or very long text. ` +
+              `The token limit has been increased to 8000. If this persists, try splitting the PDF or reducing page text length.`
+            );
+          }
         }
       }
     }
@@ -304,24 +419,84 @@ export const getSeedanceAspectRatio = (width, height) => {
 };
 
 // Seedance via Replicate API functions
-export const createSeedanceTask = async (imageBase64, seedancePrompt, imageDimensions, setError, generationId = null, duration = 5, abortSignal = null) => {
+export const createSeedanceTask = async (imageBase64, seedancePrompt, imageDimensions, setError, generationId = null, duration = 5, abortSignal = null, lastFrameImage = null) => {
   const aspectRatio = imageDimensions ? getSeedanceAspectRatio(imageDimensions.width, imageDimensions.height) : '16:9';
+  
+  // Ensure we have clean, serializable values
+  const cleanPrompt = typeof seedancePrompt === 'string' ? seedancePrompt : String(seedancePrompt || '');
+  const cleanImageBase64 = typeof imageBase64 === 'string' ? imageBase64 : null;
+  const cleanGenerationId = typeof generationId === 'string' ? generationId : null;
+  
+  // Validate image base64 format
+  if (cleanImageBase64 && !cleanImageBase64.match(/^[A-Za-z0-9+/]*={0,2}$/)) {
+    console.error('❌ Invalid base64 image data detected');
+    setError('Invalid image data format');
+    return null;
+  }
+  
+  // Handle last frame image
+  let lastFrameBase64 = null;
+  if (lastFrameImage && lastFrameImage.url) {
+    try {
+      // Fetch the last frame image and convert to base64
+      const response = await fetch(lastFrameImage.url);
+      const blob = await response.blob();
+      const arrayBuffer = await blob.arrayBuffer();
+      
+      // Convert to base64 using chunk-based approach to avoid stack overflow
+      const uint8Array = new Uint8Array(arrayBuffer);
+      let binaryString = '';
+      const chunkSize = 8192;
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
+        binaryString += String.fromCharCode.apply(null, chunk);
+      }
+      const base64 = btoa(binaryString);
+      lastFrameBase64 = `data:image/jpeg;base64,${base64}`;
+    } catch (error) {
+      console.warn('Failed to fetch last frame image:', error);
+    }
+  }
   
   const payload = {
     input: {
-      prompt: seedancePrompt,
-      ...(imageBase64 ? { image: `data:image/jpeg;base64,${imageBase64}` } : {}),
+      prompt: cleanPrompt,
+      ...(cleanImageBase64 ? { image: `data:image/jpeg;base64,${cleanImageBase64}` } : {}),
+      ...(lastFrameBase64 ? { last_frame_image: lastFrameBase64 } : {}),
       resolution: '1080p',  // Always use highest quality
       aspect_ratio: aspectRatio,
-      duration: duration,   // Dynamic duration from GPT-5 analysis
+      duration: Number(duration) || 5,   // Ensure it's a number
       fps: 24,
       camera_fixed: true    // Prevent unwanted camera movements
     },
-    generationId: generationId  // OPTIMIZATION 3: Include generation ID for WebSocket progress
+    ...(cleanGenerationId ? { generationId: cleanGenerationId } : {})
   };
 
+  // Debug logging to identify issues
+  console.log('🔍 Seedance payload debug:', {
+    hasImage: !!cleanImageBase64,
+    imageLength: cleanImageBase64 ? cleanImageBase64.length : 0,
+    hasLastFrame: !!lastFrameBase64,
+    lastFrameLength: lastFrameBase64 ? lastFrameBase64.length : 0,
+    promptLength: cleanPrompt.length,
+    aspectRatio,
+    duration: Number(duration),
+    payloadSize: JSON.stringify(payload).length
+  });
+
   try {
-    const response = await fetch('/api/seedance/create', {
+    // Debug logging to help identify the issue
+    console.log('Creating Seedance task with payload:', {
+      prompt: cleanPrompt.substring(0, 100) + '...',
+      hasImage: !!cleanImageBase64,
+      hasLastFrame: !!lastFrameBase64,
+      aspectRatio,
+      duration: Number(duration) || 5,
+      generationId: cleanGenerationId
+    });
+    
+    const apiUrl = import.meta.env.VITE_API_URL || '/api';
+    const response = await fetch(`${apiUrl}/api/seedance/create`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -346,11 +521,12 @@ export const createSeedanceTask = async (imageBase64, seedancePrompt, imageDimen
 
 export const pollSeedanceTask = async (predictionId, setError, generationId = null, abortSignal = null) => {
   try {
-    const url = generationId 
-      ? `/api/seedance/status/${predictionId}?generationId=${encodeURIComponent(generationId)}`
-      : `/api/seedance/status/${predictionId}`;
+    const apiUrl = import.meta.env.VITE_API_URL || '/api';
+    const endpoint = generationId 
+      ? `${apiUrl}/api/seedance/status/${predictionId}?generationId=${encodeURIComponent(generationId)}`
+      : `${apiUrl}/api/seedance/status/${predictionId}`;
       
-    const response = await fetch(url, {
+    const response = await fetch(endpoint, {
       headers: {
         'Content-Type': 'application/json'
       },
@@ -373,7 +549,7 @@ export const pollSeedanceTask = async (predictionId, setError, generationId = nu
 
 // Enhanced video generation using GPT-5 
 export const generateVideoWithSeedance = async (project, sceneId, imageBase64, feedback, setError, setLoadingMessage, options = {}) => {
-  const { imageDimensions = null, textData = null, generationId = null, websocketCallback = null, abortSignal = null } = options;
+  const { imageDimensions = null, textData = null, generationId = null, websocketCallback = null, abortSignal = null, duration = 5, lastFrameImage = null } = options;
   
   // Check for cancellation before starting
   if (abortSignal?.aborted) {
@@ -393,8 +569,8 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
     throw new Error('Generation cancelled');
   }
   
-  // Create Seedance task with 5 second duration
-  const predictionId = await createSeedanceTask(imageBase64, seedancePrompt, imageDimensions, setError, generationId, 5, abortSignal);
+  // Create Seedance task with dynamic duration
+  const predictionId = await createSeedanceTask(imageBase64, seedancePrompt, imageDimensions, setError, generationId, duration, abortSignal, lastFrameImage);
   
   // Wait 10 seconds before starting to poll (with cancellation support)
   await new Promise((resolve, reject) => {
@@ -423,8 +599,16 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
     
     const prediction = await pollSeedanceTask(predictionId, setError, generationId, abortSignal);
     
+    // Log polling status for debugging
+    console.log(`🎬 Video generation poll ${attempts + 1}/${maxAttempts}:`, {
+      status: prediction.status,
+      hasOutput: !!prediction.output,
+      predictionId: predictionId.substring(0, 20) + '...'
+    });
+    
     if (prediction.status === 'succeeded' && prediction.output) {
       // Video is ready!
+      console.log('✅ Video generation succeeded!');
       return {
         prompt: seedancePrompt,
         video_url: prediction.output,
@@ -432,12 +616,14 @@ export const generateVideoWithSeedance = async (project, sceneId, imageBase64, f
         model: 'seedance-gpt5',
         aspect_ratio: aspectRatio,
         resolution: '1080p',
-        duration: 5
+        duration: duration
       };
     } else if (prediction.status === 'failed') {
       const errorMessage = prediction.error || 'Unknown error';
+      console.error('❌ Video generation failed:', errorMessage);
       throw new Error(`Seedance generation failed: ${errorMessage}`);
     } else if (prediction.status === 'canceled') {
+      console.error('❌ Video generation was canceled');
       throw new Error('Seedance generation was canceled');
     }
     
